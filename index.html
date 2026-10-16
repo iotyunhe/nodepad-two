@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Notepad Two — 高性能文本编辑器</title>
+<link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+<div id="app">
+  <div class="menubar" id="menubar"></div>
+  <div class="toolbar" id="toolbar"></div>
+  <div class="tabstrip">
+    <div class="tabbar" id="tabbar"></div>
+    <div class="tabstrip-actions" id="tabActions"></div>
+  </div>
+  <div class="main">
+    <div class="editor-host" id="editorHost"></div>
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-tabs" id="sidebarTabs"></div>
+      <div class="sidebar-body" id="sidebarBody"></div>
+    </div>
+  </div>
+  <div class="statusbar" id="statusbar"></div>
+  <div class="findbar" id="findbar" hidden></div>
+  <div class="palette-wrap" id="paletteWrap" hidden>
+    <div class="palette" id="palette"></div>
+  </div>
+  <div class="toast-wrap" id="toastWrap"></div>
+  <div class="overlay" id="overlay" hidden>
+    <div class="overlay-card" id="overlayCard"></div>
+  </div>
+</div>
+
+<script src="src/00-core.js"></script>
+<script src="src/10-document.js"></script>
+<script src="src/20-languages.js"></script>
+<script src="src/30-folds.js"></script>
+<script src="src/40-view.js"></script>
+<script src="src/50-completion.js"></script>
+<script src="src/60-search.js"></script>
+<script src="src/70-macro.js"></script>
+<script src="src/80-plugins.js"></script>
+<script src="src/90-largefile.js"></script>
+<script src="src/95-app.js"></script>
+<script src="src/98-desktop.js"></script>
+<script src="src/99-boot.js"></script>
+</body>
+</html>

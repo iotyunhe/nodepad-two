@@ -1,0 +1,95 @@
+{
+  "name": "notepad-two",
+  "productName": "Notepad Two",
+  "version": "1.0.1",
+  "description": "高性能多标签文本编辑器 —— 多标签、语法高亮、代码折叠、自动补全、正则查找替换、宏录制、插件扩展、大文件秒开",
+  "main": "main.js",
+  "author": {
+    "name": "Notepad Two",
+    "email": "dev@notepad-two.local"
+  },
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "postinstall": "node patch-builder-templates.js",
+    "patch-templates": "node patch-builder-templates.js",
+    "prepare-app": "node prepare-app.js",
+    "start": "node prepare-app.js && electron .",
+    "dist": "node patch-builder-templates.js && node prepare-app.js && electron-builder --win nsis msi",
+    "dist:nsis": "node patch-builder-templates.js && node prepare-app.js && electron-builder --win nsis",
+    "dist:msi": "node patch-builder-templates.js && node prepare-app.js && electron-builder --win msi"
+  },
+  "devDependencies": {
+    "electron": "38.8.6",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.notepadtwo.editor",
+    "productName": "Notepad Two",
+    "copyright": "Copyright © 2026 Notepad Two",
+    "asar": true,
+    "directories": {
+      "output": "../../notepad-two-dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "app/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "msi",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "requestedExecutionLevel": "asInvoker",
+      "legalTrademarks": "Notepad Two"
+    },
+    "nsis": {
+      "artifactName": "${productName}-${version}-${arch}-Setup.${ext}",
+      "language": "2052",
+      "installerLanguages": [
+        "zh_CN"
+      ],
+      "displayLanguageSelector": false,
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Notepad Two",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "menuCategory": false
+    },
+    "msi": {
+      "additionalLightArgs": [
+        "-cultures:zh-cn"
+      ],
+      "oneClick": false,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Notepad Two",
+      "runAfterFinish": true,
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    }
+  }
+}

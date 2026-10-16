@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>Notepad Two — 浏览器端功能测试</title>
+<link rel="stylesheet" href="../src/styles.css">
+<style>
+  #testout { position: fixed; inset: 0; z-index: 99999; background: #fff; color: #111;
+             font: 12px/1.6 monospace; padding: 16px; overflow: auto; white-space: pre-wrap; }
+  #app { visibility: hidden; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="menubar" id="menubar"></div>
+  <div class="toolbar" id="toolbar"></div>
+  <div class="tabstrip">
+    <div class="tabbar" id="tabbar"></div>
+    <div class="tabstrip-actions" id="tabActions"></div>
+  </div>
+  <div class="main">
+    <div class="editor-host" id="editorHost"></div>
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-tabs" id="sidebarTabs"></div>
+      <div class="sidebar-body" id="sidebarBody"></div>
+    </div>
+  </div>
+  <div class="statusbar" id="statusbar"></div>
+  <div class="findbar" id="findbar" hidden></div>
+  <div class="palette-wrap" id="paletteWrap" hidden><div class="palette" id="palette"></div></div>
+  <div class="toast-wrap" id="toastWrap"></div>
+  <div class="overlay" id="overlay" hidden><div class="overlay-card" id="overlayCard"></div></div>
+</div>
+<pre id="testout">运行中…</pre>
+
+<script src="../src/00-core.js"></script>
+<script src="../src/10-document.js"></script>
+<script src="../src/20-languages.js"></script>
+<script src="../src/30-folds.js"></script>
+<script src="../src/40-view.js"></script>
+<script src="../src/50-completion.js"></script>
+<script src="../src/60-search.js"></script>
+<script src="../src/70-macro.js"></script>
+<script src="../src/80-plugins.js"></script>
+<script src="../src/90-largefile.js"></script>
+<script src="../src/95-app.js"></script>
+<script src="../src/98-desktop.js"></script>
+<script>
+/* ============================================================ 测试框架 */
+const out = [];
+let pass = 0, fail = 0;
+function ok(cond, name, extra) {
+  if (cond) { pass++; out.push('PASS  ' + name); }
+  else { fail++; out.push('FAIL  ' + name + (extra ? '   → ' + extra : '')); }
+}
+function eq(a, b, name) {
+  const sa = JSON.stringify(a), sb = JSON.stringify(b);
+  ok(sa === sb, name, '期望 ' + sb + '，实际 ' + sa);
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 模拟真实键盘输入：改写 textarea 的值并派发 input 事件，
+ *  从而走完整的「差分 → 映射 → 文档」链路，而不是直接调 API。 */
+function typeText(view, text) {
+  const ta = view.input;
+  const s = ta.selectionStart, e = ta.selectionEnd;
+  ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
+  const p = s + text.length;
+  ta.setSelectionRange(p, p);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+async function main() {
+  const app = new NT.App();
+  NT.app = app; window.app = app;
+  app.boot();
+  const view = app.view;
+  await sleep(60);
+
+  /* ---------------------------------------------------- 启动与基本渲染 */
+  out.push('--- 启动 / 渲染 ---');
+  ok(!!app.activeDoc, '启动后有活动文档');
+  eq(app.tabs.length, 1, '默认打开 1 个标签页');
+  ok(view.hlCode.innerHTML.length > 200, '高亮层已渲染内容');
+  ok(view.gutterInner.innerHTML.indexOf('nt-ln') >= 0, '行号槽已渲染');
+  eq(view.metrics.lh, 20, '行高与 CSS 变量一致');
+  ok(view.metrics.cw > 4 && view.metrics.cw < 12, '字符宽度测量合理 (' + view.metrics.cw.toFixed(2) + ')');
+
+  /* ---------------------------------------------------- 输入 → 文档链路 */
+  out.push('--- 输入 / 撤销 ---');
+  const t1 = app.newTab(new NT.Document('hello world\nsecond line\nthird', { name: 't1.js', language: 'javascript' }));
+  await sleep(30);
+  view.setCaret(5);
+  typeText(view, ' beautiful');
+  eq(app.activeDoc.lineAt(0), 'hello beautiful world', '模拟输入写回文档');
+  ok(app.activeDoc.dirty, '输入后标记为脏');
+  app.exec('edit.undo');
+  eq(app.activeDoc.lineAt(0), 'hello world', '撤销恢复');
+  app.exec('edit.redo');
+  eq(app.activeDoc.lineAt(0), 'hello beautiful world', '重做恢复');
+
+  // 输入后视图文本与文档文本必须严格一致（否则说明差分/映射有偏差）
+  eq(view.viewText, app.activeDoc.getText(), '视图文本与文档文本一致');
+
+  /* ---------------------------------------------------- 自动缩进与配对 */
+  out.push('--- 自动缩进 / 括号配对 ---');
+  const d2 = app.newTab(new NT.Document('if (a) {\n}', { name: 't2.js', language: 'javascript' }));
+  await sleep(20);
+  view.setCaret(0);
+  typeText(view, 'x');
+  eq(app.activeDoc.lineAt(0), 'xif (a) {', '普通字符插入');
+  app.exec('edit.undo');
+
+  const d3 = app.newTab(new NT.Document('', { name: 't3.js', language: 'javascript' }));
+  await sleep(20);
+  view.setCaret(0);
+  // 只派发 keydown，让 view 自己的自动配对分支处理（不应再手动插入）
+  const ev = new KeyboardEvent('keydown', { key: '(', bubbles: true, cancelable: true });
+  view.input.dispatchEvent(ev);
+  eq(app.activeDoc.getText(), '()', '自动配对插入括号');
+  eq(app.activeDoc.sel.head, 1, '自动配对后光标落在括号内');
+  // 再按一次右括号应「跳过」而不是重复插入
+  view.input.dispatchEvent(new KeyboardEvent('keydown', { key: ')', bubbles: true, cancelable: true }));
+  eq(app.activeDoc.getText(), '()', '闭合符已存在时不重复插入');
+  eq(app.activeDoc.sel.head, 2, '跳过闭合符后光标右移');
+
+  /* ---------------------------------------------------- 语法高亮 */
+  out.push('--- 语法高亮 ---');
+  const jsDoc = new NT.Document(
+    'function add(a, b) {\n' +
+    '  const s = "hi"; // 注释\n' +
+    '  /* 块注释\n' +
+    '     跨行 */\n' +
+    '  return a + b + 42;\n' +
+    '}\n', { name: 't4.js', language: 'javascript' });
+  app.newTab(jsDoc);
+  await sleep(40);
+  const html = view.hlCode.innerHTML;
+  ok(html.indexOf('tk-keyword') >= 0, '关键字着色');
+  ok(html.indexOf('tk-string') >= 0, '字符串着色');
+  ok(html.indexOf('tk-number') >= 0, '数字着色');
+  ok(html.indexOf('tk-comment') >= 0, '注释着色');
+  const st = jsDoc.lines;
+  const r1 = NT.languages.tokenize(NT.languages.get('javascript'), st[2], NT.languages.INITIAL);
+  const r2 = NT.languages.tokenize(NT.languages.get('javascript'), st[3], r1.state);
+  eq(r2.tokens[0].t, 'comment', '跨行块注释状态机延续');
+
+  /* ---------------------------------------------------- 代码折叠 */
+  out.push('--- 代码折叠 ---');
+  const before = view.viewLineCount;
+  ok(view.foldModel.count >= 1, '检测到折叠区（' + view.foldModel.count + ' 个）');
+  view.toggleFold(0);
+  ok(view.viewLineCount < before, '折叠后视图行数减少（' + before + ' → ' + view.viewLineCount + '）');
+  ok(view.input.value.indexOf('已折叠') >= 0, '折叠占位符出现在 textarea 中');
+  eq(view.input.value.split('\n').length, view.viewLineCount, 'textarea 行数与视图行数一致');
+  // 折叠态下在折叠起始行末尾输入，不应把占位符写进文档
+  view.setCaret(jsDoc.offsetAt(0, jsDoc.lineLength(0)));
+  typeText(view, ' /*x*/');
+  ok(jsDoc.lineAt(0).indexOf('已折叠') < 0, '折叠态输入不会污染文档');
+  ok(jsDoc.lineAt(0).indexOf('/*x*/') >= 0, '折叠态输入正确落到文档');
+  app.exec('edit.undo');
+  view.toggleFold(0);
+  eq(view.viewLineCount, before, '展开后视图行数复原');
+  eq(view.viewText, jsDoc.getText(), '展开后视图文本 == 文档文本');
+  app.exec('view.foldAll');
+  ok(view.viewLineCount < before, '折叠全部生效');
+  app.exec('view.unfoldAll');
+  eq(view.viewLineCount, before, '展开全部复原');
+
+  /* ---------------------------------------------------- 查找 / 替换 */
+  out.push('--- 查找 / 替换 ---');
+  const sd = new NT.Document('foo bar FOO foobar\nbaz foo\na@x.com b@y.com',
+    { name: 's.txt', language: 'plaintext' });
+  app.newTab(sd);
+  await sleep(20);
+  app.searchState.query = 'foo';
+  app.searchState.caseSensitive = false;
+  app.searchState.regex = false;
+  app._runSearch(true);
+  eq(app.searchState.matches.length, 4, '忽略大小写字面量匹配数');
+  eq(view.searchMatches.length, 4, '高亮装饰已下发');
+  app.searchState.caseSensitive = true;
+  app._runSearch(true);
+  eq(app.searchState.matches.length, 3, '区分大小写匹配数');
+
+  app.searchState.query = '(\\w+)@(\\w+)\\.com';
+  app.searchState.regex = true;
+  app.searchState.caseSensitive = false;
+  app.searchState.replacement = '$2://$1';
+  app._runSearch(true);
+  eq(app.searchState.matches.length, 2, '正则匹配邮箱数');
+  app.exec('search.replaceAll');
+  eq(sd.lineAt(2), 'x://a y://b', '正则反向引用替换结果');
+  app.exec('edit.undo');
+  eq(sd.lineAt(2), 'a@x.com b@y.com', '替换全部可一次撤销');
+
+  /* ---------------------------------------------------- 文本处理插件 */
+  out.push('--- 文本处理 ---');
+  app.searchState.matches = [];
+  // 注意：末尾的 \n 会产生一个空行，排序后空行排在最前
+  const td = new NT.Document('banana\nApple\ncherry\nbanana\n', { name: 'x.txt' });
+  app.newTab(td);
+  await sleep(20);
+  app.exec('text.process', { id: 'sortAsc' });
+  eq(td.lines[0], '', '升序排序：空行排在最前');
+  eq(td.lines[1], 'Apple', '升序排序：第二行 Apple');
+  eq(td.lines[4], 'cherry', '升序排序：末行 cherry');
+  app.exec('edit.undo');
+  eq(td.lineAt(0), 'banana', '排序可撤销');
+  app.exec('text.process', { id: 'dedupe' });
+  eq(td.lines.length, 4, '删除重复行（5 → 4）');
+  app.exec('edit.undo');
+  app.exec('text.process', { id: 'upper' });
+  eq(td.lineAt(0), 'BANANA', '转大写');
+  app.exec('edit.undo');
+  app.exec('text.process', { id: 'trimTrailing' });
+  eq(td.lineAt(0), 'banana', '去行尾空白（无变化）');
+  app.exec('edit.undo');
+
+  /* ---------------------------------------------------- 编辑命令 */
+  out.push('--- 编辑命令 ---');
+  const ed = new NT.Document('one\ntwo\nthree', { name: 'e.txt' });
+  app.newTab(ed);
+  await sleep(20);
+  view.setCaret(ed.offsetAt(1, 0));
+  app.exec('edit.moveLineDown');
+  eq(ed.getText(), 'one\nthree\ntwo', '下移当前行');
+  app.exec('edit.moveLineUp');
+  eq(ed.getText(), 'one\ntwo\nthree', '上移当前行（可逆）');
+  view.setCaret(ed.offsetAt(1, 0));
+  app.exec('edit.duplicateLine');
+  eq(ed.getText(), 'one\ntwo\ntwo\nthree', '复制当前行');
+  app.exec('edit.undo');
+  view.setCaret(ed.offsetAt(1, 0));
+  app.exec('edit.deleteLine');
+  eq(ed.getText(), 'one\nthree', '删除当前行');
+  app.exec('edit.undo');
+  app.exec('edit.selectAll');
+  app.exec('edit.toggleComment');
+  eq(ed.lineAt(0), '// one', '切换行注释（加）');
+  app.exec('edit.toggleComment');
+  eq(ed.lineAt(0), 'one', '切换行注释（去）');
+  app.exec('edit.gotoLine');
+
+  /* ---------------------------------------------------- 宏录制回放 */
+  out.push('--- 宏录制 / 回放 ---');
+  const md = new NT.Document('line\n', { name: 'm.txt' });
+  app.newTab(md);
+  await sleep(20);
+  view.setCaret(md.length);
+  app.macros.start('测试宏');
+  app.exec('edit.insertText', { text: 'X' });
+  app.exec('edit.insertText', { text: 'Y' });
+  app.exec('edit.insertText', { text: 'Z' });
+  const rec = app.macros.stop();
+  eq(rec.steps.length, 3, '录制到 3 个步骤');
+  eq(md.getText(), 'line\nXYZ', '录制期间操作已生效');
+  await app.macros.play('测试宏', { delay: 0 });
+  eq(md.getText(), 'line\nXYZXYZ', '回放一次追加 XYZ');
+  await app.macros.play('测试宏', { times: 2, delay: 0 });
+  eq(md.getText(), 'line\nXYZXYZXYZXYZ', '回放两次追加 2×XYZ');
+  app.exec('edit.undo');
+  eq(md.getText(), 'line\nXYZXYZ', '整段回放可一次撤销');
+  ok(app.macros.exportJson().indexOf('测试宏') > 0, '宏可导出为 JSON');
+
+  /* ---------------------------------------------------- 插件系统 */
+  out.push('--- 插件系统 ---');
+  const plist = app.plugins.list();
+  ok(plist.length >= 5, '内置插件已注册（' + plist.length + ' 个）');
+  ok(app.plugins.isEnabled('builtin.texttools'), '文本处理插件已启用');
+  const wc = plist.find((p) => p.id === 'builtin.wordcount');
+  ok(!!wc && wc.enabled, '文档统计插件已启用');
+  eq(app.textProcessors.length >= 20, true, '文本处理器数量 ' + app.textProcessors.length);
+  // 停用/启用：只有该插件注册的处理器应被移除（时间戳插件也注册了一个，故不为 0）
+  const nTp = app.textProcessors.length;
+  app.plugins.deactivate('builtin.texttools');
+  ok(!app.textProcessors.some((t) => t.plugin === 'builtin.texttools'), '停用插件后其处理器被移除');
+  ok(app.textProcessors.length < nTp, '处理器总数下降（' + nTp + ' → ' + app.textProcessors.length + '）');
+  app.plugins.activate('builtin.texttools');
+  ok(app.textProcessors.length >= 20, '重新启用后处理器恢复');
+  // 动态加载
+  const dyn = app.plugins.loadFromSource(
+    "define({id:'dyn.t',name:'动态插件',defaultEnabled:false," +
+    "activate(ctx){ctx.addTextProcessor({id:'rev',title:'反转文本',run:(t)=>t.split('').reverse().join('')});}});");
+  app.plugins.activate('dyn.t');
+  ok(app.textProcessors.some((t) => t.id === 'rev'), '动态插件处理器已注册');
+  const rd = new NT.Document('abc');
+  app.newTab(rd);
+  await sleep(20);
+  app.exec('text.process', { id: 'rev' });
+  eq(rd.getText(), 'cba', '动态插件处理器生效');
+  app.plugins.deactivate('dyn.t');
+  ok(!app.textProcessors.some((t) => t.id === 'rev'), '停用后动态处理器被清理');
+
+  // 装饰器（括号配对）
+  const bd = new NT.Document('const a = fn(x, 1);\n', { name: 'b.js', language: 'javascript' });
+  app.newTab(bd);
+  await sleep(30);
+  view.setCaret(bd.getText().indexOf('(') + 1);
+  view.render(true);
+  ok(view.hlCode.innerHTML.indexOf('dec-bracket') >= 0, '括号配对装饰器生效');
+
+  /* ---------------------------------------------------- 命令面板 / 快捷键 */
+  out.push('--- 命令面板 / 快捷键 ---');
+  app.exec('ui.palette');
+  ok(!document.getElementById('paletteWrap').hidden, '命令面板可打开');
+  document.getElementById('paletteInput').value = '折叠';
+  app._renderPalette();
+  ok(app._paletteItems.length > 0, '命令面板可检索（' + app._paletteItems.length + ' 条）');
+  app.hidePalette();
+  // 快捷键派发
+  const kbEv = new KeyboardEvent('keydown', { key: 'P', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true });
+  const handled = app.handleKey(kbEv);
+  ok(handled, 'Ctrl+Shift+P 被命令系统捕获');
+  app.hidePalette();
+
+  /* ------------------------------------------------ 桌面外壳适配层（浏览器侧） */
+  out.push('--- 桌面外壳适配层 ---');
+  ok(typeof NT.installDesktopIntegration === 'function', '桌面桥接层已加载');
+  ok(NT.isDesktop() === false, '浏览器环境下识别为非桌面');
+  // 关键：浏览器里必须是一个彻底的 no-op，不能篡改文件命令的行为
+  const beforeOpen = app.commands.get('file.open').run;
+  const beforeSave = app.commands.get('file.save').run;
+  ok(NT.installDesktopIntegration(app) === false, '浏览器环境下桌面集成直接返回 false');
+  ok(app.commands.get('file.open').run === beforeOpen, '浏览器环境下 file.open 未被改写');
+  ok(app.commands.get('file.save').run === beforeSave, '浏览器环境下 file.save 未被改写');
+
+  /* ---------------------------------------------------- 标签页 */
+  out.push('--- 标签页 ---');
+  const n0 = app.tabs.length;
+  const nt = app.newTab(new NT.Document('temp', { name: 'temp.txt' }));
+  eq(app.tabs.length, n0 + 1, '新建标签页');
+  ok(app.activeTab === nt, '新建后自动激活');
+  ok(app.view.doc === nt.doc, '视图已切换到新文档');
+  await app.closeTab(nt);
+  eq(app.tabs.length, n0, '关闭标签页');
+  ok(app.activeTab !== nt, '关闭后激活的是其它标签页');
+
+  /* ---------------------------------------------------- 大文件管线 */
+  out.push('--- 大文件加载管线 ---');
+  const LINES = 1000000;
+  const file = NT.largefile.generateTestFile(LINES, 'js');
+  ok(file.size > 20 * 1024 * 1024, '合成文件体积 ' + NT.util.formatBytes(file.size));
+  const t0 = performance.now();
+  const opened = await NT.largefile.openFile(app, file);
+  const ms = performance.now() - t0;
+  app.newTab(opened.doc);
+  await sleep(80);
+  eq(opened.doc.lines.length, LINES, '大文件行数正确');
+  ok(view.lightweight, '超过阈值自动进入轻量模式');
+  // 注意：本页在无头浏览器里跑，performance.now() 受 --virtual-time-budget 虚拟化，
+  // 这里的耗时数字仅作「没有挂死」的哨兵，权威性能数据见 test/bench-largefile.js
+  ok(ms < 600000, '分片流式加载完成（' + Math.round(ms) + 'ms，含虚拟时钟开销；' +
+     NT.util.formatBytes(file.size) + ' / ' + LINES.toLocaleString() + ' 行）');
+  // 虚拟化：高亮层只渲染可见行
+  const rows = view.hlCode.querySelectorAll('.row').length;
+  ok(rows > 0 && rows < 300, '虚拟化渲染只生成 ' + rows + ' 行 DOM（总行数 ' + LINES.toLocaleString() + '）');
+  // 跳转到末尾
+  const tJump = performance.now();
+  const lastOff = opened.doc.offsetAt(LINES - 1, 0);
+  view.setCaret(lastOff);
+  const jumpMs = performance.now() - tJump;
+  ok(jumpMs < 500, '跳转到第 ' + LINES.toLocaleString() + ' 行耗时 ' + jumpMs.toFixed(1) + 'ms');
+  eq(opened.doc.positionAt(lastOff).line, LINES - 1, '末尾定位正确');
+  // 大文件上的编辑
+  const tEdit = performance.now();
+  view.setCaret(lastOff);
+  typeText(view, 'X');
+  const editMs = performance.now() - tEdit;
+  ok(editMs < 500, '大文件末尾输入耗时 ' + editMs.toFixed(1) + 'ms');
+  eq(opened.doc.lineAt(LINES - 1).slice(0, 1), 'X', '大文件编辑生效');
+  // 大文件上的搜索
+  const tSearch = performance.now();
+  const m = NT.search.findAll(opened.doc, 'return', { caseSensitive: true, limit: 5000 });
+  const searchMs = performance.now() - tSearch;
+  ok(m.length > 0, '大文件搜索命中 ' + m.length + ' 处（上限 5000），耗时 ' + Math.round(searchMs) + 'ms');
+  ok(searchMs < 15000, '大文件搜索性能可接受');
+  // 中部随机跳转（验证行起始偏移索引没有退化）
+  const tMid = performance.now();
+  for (let k = 0; k < 2000; k++) opened.doc.positionAt((k * 987654321) % opened.doc.length);
+  const idxMs = performance.now() - tMid;
+  ok(idxMs < 600, '随机偏移↔行列换算 2000 次耗时 ' + idxMs.toFixed(1) + 'ms');
+  // 纯文本档位
+  const tier = NT.largefile.tierOf(opened.doc.byteSize, LINES);
+  eq(tier.id, 'light', '性能档位判定为轻量模式');
+  out.push('   [数据] ' + NT.util.formatBytes(file.size) + ' / ' + LINES.toLocaleString() +
+           ' 行：DOM 仅 ' + rows + ' 行，跳转 ' + jumpMs.toFixed(1) + 'ms，编辑 ' + editMs.toFixed(1) +
+           'ms，随机换算 2000 次 ' + idxMs.toFixed(1) + 'ms');
+
+  /* ---------------------------------------------------- 汇总 */
+  out.push('');
+  out.push('========================================');
+  out.push('通过 ' + pass + ' 项，失败 ' + fail + ' 项');
+  out.push('========================================');
+  document.getElementById('testout').textContent = out.join('\n');
+  document.title = fail ? ('FAILED:' + fail) : ('ALLPASS:' + pass);
+}
+
+main().catch((e) => {
+  out.push('');
+  out.push('*** 测试运行异常 ***');
+  out.push(e && e.stack ? e.stack : String(e));
+  document.getElementById('testout').textContent = out.join('\n');
+  document.title = 'CRASH';
+});
+</script>
+</body>
+</html>

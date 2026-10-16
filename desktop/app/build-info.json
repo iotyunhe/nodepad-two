@@ -1,0 +1,7 @@
+{
+  "product": "Notepad Two",
+  "version": "1.0.0",
+  "appId": "com.notepadtwo.editor",
+  "electron": "38.8.6",
+  "builtAt": "2026-10-15T15:26:56.765Z"
+}
