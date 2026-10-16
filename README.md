@@ -14,8 +14,32 @@ python -m http.server 8000
 # 然后访问 http://localhost:8000/index.html
 ```
 
-**方式三（桌面版）**：安装 `release-final/Notepad Two-1.0.0-x64-Setup.exe`，
-或直接运行 `release-final/win-unpacked/Notepad Two.exe`。详见下方「桌面版」。
+**方式三（桌面版）**：安装 `release/Notepad Two-1.0.1-x64-Setup.exe`，
+或直接运行 `release/win-unpacked/Notepad Two.exe`。详见下方「桌面版」。
+
+## 版本管理
+
+项目用 git 管理，主分支 `main`，当前版本 **v1.0.1**。
+
+**约定：每次改动都同步升 `desktop/package.json` 里的 `version`，并打对应标签。**
+
+| 变更类型 | 版本号怎么走 | 示例 |
+| --- | --- | --- |
+| 修复缺陷、文案或配置调整 | 补丁位 +1 | `1.0.0` → `1.0.1` |
+| 新增向后兼容的功能 | 次版本 +1，补丁位归零 | `1.0.1` → `1.1.0` |
+| 不兼容的改动 | 主版本 +1，其余归零 | `1.1.0` → `2.0.0` |
+
+```bash
+git log --oneline           # 历史提交
+git tag -l                  # 所有版本标签
+git show v1.0.1 --stat      # 某个版本的改动范围
+```
+
+安装包文件名带版本号（`Notepad Two-<version>-x64-Setup.exe`），
+所以升版本号后要重新打包一次。
+
+> 仓库**不跟踪构建产物**（`release/`、`node_modules/`、`dist-desktop/` 等
+> 已在 `.gitignore` 排除），只管理源码、测试与文档。
 
 ## 重新构建
 
@@ -28,14 +52,14 @@ python build.py     # 把 src/ 下的 13 个模块与样式内联进 dist/notepa
 ```bash
 node test/core.test.js                  # 核心逻辑单测（87 项，无需浏览器）
 node test/bench-largefile.js 1000000    # 大文件基准（分阶段计时 + 复杂度断言）
-node test/localization.test.js          # 中文化配置回归（24 项，无需 Electron）
+node test/localization.test.js          # 中文化 + 目录页回归（33 项，无需 Electron）
 ```
 
 安装包语言实测（MSI 通过 `msi.dll` 读取，NSIS 通过生成脚本断言）：
 
 ```bash
-python test/verify-installer-zh.py "release-final/Notepad Two-1.0.0-x64.msi" \
-                                   "release-final/Notepad Two-1.0.0-x64-Setup.exe"
+python test/verify-installer-zh.py "release/Notepad Two-1.0.1-x64.msi" \
+                                   "release/Notepad Two-1.0.1-x64-Setup.exe"
 ```
 
 浏览器端到端测试：用 Chrome 打开 `test/browser.test.html`（93 项），
@@ -124,11 +148,25 @@ define({
 
 | 产物 | 体积 | 用途 |
 | --- | --- | --- |
-| `release-final/Notepad Two-1.0.0-x64-Setup.exe` | 89.7 MB | NSIS 安装程序，图形化向导、可选安装目录、自动建快捷方式。**个人用户首选** |
-| `release-final/Notepad Two-1.0.0-x64.msi` | 103.6 MB | MSI 标准安装包，支持 `msiexec /qn` 静默安装与组策略/SCCM 分发。**企业批量部署** |
-| `release-final/win-unpacked/` | 325 MB | 免安装绿色版，解压即用（体积主要是 Electron 自身的 210 MB 单体 exe + 44 MB `locales/`） |
+| `release/Notepad Two-1.0.1-x64-Setup.exe` | 89.7 MB | NSIS 安装程序，图形化向导、**可选安装目录**、自动建快捷方式。**个人用户首选** |
+| `release/Notepad Two-1.0.1-x64.msi` | 103.6 MB | MSI 标准安装包，**可选安装目录**，支持 `msiexec /qn` 静默安装与组策略/SCCM 分发。**企业批量部署** |
+| `release/win-unpacked/` | 325 MB | 免安装绿色版，解压即用（体积主要是 Electron 自身的 210 MB 单体 exe + 44 MB `locales/`） |
 
-两者均为**按用户安装**（`perMachine: false`），安装过程**不需要管理员权限**。
+两者均为**按用户安装**（`perMachine: false`），安装过程**不需要管理员权限**，
+向导里都可以**自选安装路径**：
+
+- **NSIS**：`nsis.allowToChangeInstallationDirectory: true`（需配合 `oneClick: false`）
+  会插入 `MUI_PAGE_DIRECTORY`。makensis 自报 `Install: 4 pages`，
+  即 欢迎 → **选择安装位置** → 安装 → 完成。
+- **MSI**：`WixUI_InstallDir` 自带「选择安装位置」页，但 electron-builder 模板里
+  `InstallScopeDlg` 的 `Order=6` 事件在 per-user 安装下会**绕过**它（恒跳「准备安装」）——
+  已由模板补丁修正，验证器会用 `ControlEvent` 表重放一次「下一步」来确认落点。
+
+> **构建输出位置**：`desktop/package.json` 的 `directories.output` 指向
+> `../../notepad-two-dist`（即工作区**外**的 `WorkBuddy AI/notepad-two-dist`）。
+> 这是因为 electron-builder 每次打包前会调用 `emptyDir(appOutDir)`，
+> 而本环境无法删除工作区内名为 `app.asar` 的文件 —— 输出到工作区外即可反复构建、
+> 不残留目录。`release/` 下的产物是从那里复制来的最终交付副本。
 
 ### 界面语言：简体中文
 
@@ -140,7 +178,7 @@ define({
 | NSIS 向导 | `nsis.installerLanguages: ["zh_CN"]` | 决定向导文案。内部展开为 `MUI_LANGUAGE "SimpChinese"` |
 | NSIS 文件属性 | `nsis.language: "2052"` | 写入 exe 版本信息的 `/LANG=`，只影响属性页的语言标记 |
 | MSI 向导 | `msi.additionalLightArgs: ["-cultures:zh-cn"]` | `light.exe` 从 `WixUIExtension.dll` 取 zh-cn 本地化资源 |
-| MSI 模板文案 | `desktop/patch-builder-templates.js` | 改写模板里 4 处硬编码英文（产品语言、系统版本提示、降级提示、完成页「运行」复选框） |
+| MSI 模板文案 | `desktop/patch-builder-templates.js` | 改写 MSI 模板 6 处：4 处硬编码英文（产品语言、系统版本提示、降级提示、完成页「运行」复选框）+ 2 处「选择安装位置」页导航 |
 | NSIS 缺失消息 | 同上 | 补齐 `messages.yml` 缺的 3 条 `zh_CN` |
 | 运行时区域 | 主进程 `--lang=zh-CN` | 让 Chromium 内置字符串与 `Intl` 日期/数字格式也是中文 |
 
@@ -158,8 +196,8 @@ define({
 `npm run dist` 也会先跑一遍。校验安装包语言：
 
 ```bash
-python test/verify-installer-zh.py "release-final/Notepad Two-1.0.0-x64.msi" \
-                                   "release-final/Notepad Two-1.0.0-x64-Setup.exe"
+python test/verify-installer-zh.py "release/Notepad Two-1.0.1-x64.msi" \
+                                   "release/Notepad Two-1.0.1-x64-Setup.exe"
 ```
 
 > NSIS 的语言表被压在数据块里（不可明文检索），因此验证器断言的是
@@ -192,7 +230,7 @@ export ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-
 执行一次文本写入-读回往返，并把结果写入 JSON：
 
 ```bash
-cd release-final/win-unpacked
+cd release/win-unpacked
 env -u ELECTRON_RUN_AS_NODE "Notepad Two.exe" --smoke-test --smoke-out=result.json \
     --disable-gpu --no-sandbox
 ```

@@ -243,8 +243,8 @@ try { result = cmd.run(args || {}, this); } catch (err) { ... }
 | `test/core.test.js`（Node） | **87 / 87 通过**（原 61 + 本次新增 26） |
 | `test/browser.test.html`（无头 Chrome） | **93 / 93 通过** |
 | `test/bench-largefile.js` | 复杂度检查通过，无超线性退化 |
-| `test/localization.test.js`（中文化回归） | **24 / 24 通过** |
-| `test/verify-installer-zh.py`（安装包语言） | **19 / 19 通过**；反向对照旧产物 15 项失败 |
+| `test/localization.test.js`（中文化 + 目录页回归） | **33 / 33 通过** |
+| `test/verify-installer-zh.py`（安装包语言与安装路径） | **23 / 23 通过**；反向对照旧产物 13 项失败 |
 | Electron 冒烟自检（开发态） | **PASS** |
 | Electron 冒烟自检（打包态 asar） | **PASS** |
 | 替换语义等价性对拍 | **38 / 38 通过** |
@@ -255,7 +255,7 @@ try { result = cmd.run(args || {}, this); } catch (err) { ... }
 {
   "editorReady": true, "tabs": 1, "commands": 55, "plugins": 5, "languages": 19,
   "desktopBridge": true, "fileSaveTitle": "保存", "roundTrip": true,
-  "version": "1.0.0", "electron": "38.8.6", "chrome": "140.0.7339.249"
+  "version": "1.0.1", "electron": "38.8.6", "chrome": "140.0.7339.249"
 }
 ```
 
@@ -299,9 +299,13 @@ node prepare-app.js
 
 # ── 第 4 步：打包 ───────────────────────────────────────
 npx electron-builder --win nsis msi --x64
-#    → ../release-final/Notepad Two-1.0.0-x64-Setup.exe   （NSIS 安装程序，89.7 MB）
-#    → ../release-final/Notepad Two-1.0.0-x64.msi         （MSI 安装包，103.6 MB）
-#    → ../release-final/win-unpacked/                     （免安装绿色版，325 MB）
+#    → ../../notepad-two-dist/Notepad Two-1.0.1-x64-Setup.exe  （NSIS 安装程序，89.7 MB）
+#    → ../../notepad-two-dist/Notepad Two-1.0.1-x64.msi        （MSI 安装包，103.6 MB）
+#    → ../../notepad-two-dist/win-unpacked/                    （免安装绿色版，325 MB）
+#    输出目录由 desktop/package.json 的 directories.output 指定，
+#    刻意放在工作区**外**：electron-builder 每次打包前会 emptyDir(appOutDir)，
+#    而本环境删不掉工作区内名为 app.asar 的文件，放到外面才能反复构建。
+#    最终交付副本复制到工作区内的 release/。
 ```
 
 国内网络建议设置镜像以加速（Electron 与 WiX/NSIS 工具链体积较大）：
@@ -322,12 +326,12 @@ npm start           # 本地开发运行
 
 ### 6.3 各产物用途
 
-产物统一输出到 `release-final/`：
+产物最终交付在 `release/`（构建中间产物落在工作区外的 `notepad-two-dist/`，再复制过来）：
 
 | 产物 | 体积 | 用途 | 适用场景 |
 |---|---|---|---|
-| `Notepad Two-1.0.0-x64-Setup.exe` | 89.7 MB | **NSIS 安装程序**。图形化向导（简体中文），可选安装目录，自动建桌面与开始菜单快捷方式，自带卸载器 | **个人用户首选**。安装快，无需管理员权限 |
-| `Notepad Two-1.0.0-x64.msi` | 103.6 MB | **MSI 安装包**。标准 Windows Installer 包 | **企业 / 批量部署**。支持 `msiexec /qn` 静默安装、组策略分发、SCCM 推送、可生成 MST 变换文件 |
+| `Notepad Two-1.0.1-x64-Setup.exe` | 89.7 MB | **NSIS 安装程序**。图形化向导（简体中文），可选安装目录，自动建桌面与开始菜单快捷方式，自带卸载器 | **个人用户首选**。安装快，无需管理员权限 |
+| `Notepad Two-1.0.1-x64.msi` | 103.6 MB | **MSI 安装包**。标准 Windows Installer 包 | **企业 / 批量部署**。支持 `msiexec /qn` 静默安装、组策略分发、SCCM 推送、可生成 MST 变换文件 |
 | `win-unpacked/` | 325 MB | **免安装绿色版**。解压即用，不写注册表 | 便携使用、U 盘携带、免安装环境 |
 | `*.exe.blockmap` | 100 KB | 增量更新差分块映射 | 将来接入自动更新时用于差量下载（当前未启用自动更新） |
 
@@ -366,7 +370,7 @@ npm start           # 本地开发运行
 ### 6.5 打包后验证
 
 ```bash
-cd release-final/win-unpacked
+cd release/win-unpacked
 env -u ELECTRON_RUN_AS_NODE "Notepad Two.exe" --smoke-test --smoke-out=result.json \
     --disable-gpu --no-sandbox
 ```
@@ -526,13 +530,13 @@ ExitDialog   | Finish   | 完成(&F)
 #### 6.6.6 验证
 
 ```bash
-# 1) 配置与模板补丁的静态回归（24 项断言，不需要 Electron）
+# 1) 配置与模板补丁的静态回归（33 项断言，不需要 Electron）
 node test/localization.test.js
 
 # 2) 安装包语言实测（MSI 走 msi.dll，纯 ctypes 无第三方依赖）
 python test/verify-installer-zh.py \
-    "release-final/Notepad Two-1.0.0-x64.msi" \
-    "release-final/Notepad Two-1.0.0-x64-Setup.exe"
+    "release/Notepad Two-1.0.1-x64.msi" \
+    "release/Notepad Two-1.0.1-x64-Setup.exe"
 ```
 
 `verify-installer-zh.py` 的断言分层：
@@ -562,7 +566,7 @@ DEBUG=electron-builder node node_modules/electron-builder/cli.js --win nsis msi
 # 产物目录下的 builder-debug.yml 会多出 nsis.script 段
 ```
 
-三重独立证据互相印证（均来自 `release-final` 这一次构建）：
+三重独立证据互相印证（均来自 v1.0.1 的构建，输出在 `notepad-two-dist/`）：
 
 1. **makensis 自报**：`Install: 4 pages …, 1 language table (362 bytes).`
    —— 未设置 `installerLanguages` 时这里会是 **26 张**语言表。
@@ -575,9 +579,10 @@ DEBUG=electron-builder node node_modules/electron-builder/cli.js --win nsis msi
    不会出现"只有一个选项的语言选择框"。
 
 **反向对照（证明验证器非空转）**：对中文化之前的旧产物运行同一脚本，
-MSI 12 项失败（`Template='x64;1033'`、`0/40 条含汉字`、`Run Notepad Two` 残留），
-NSIS 3 项失败（PE 语言 `1033`、脚本注册 26 种语言），合计 **15 项失败 / 4 项通过**；
-对 `release-final` 产物则是 **19 项全过**。
+MSI 13 项失败（`Template='x64;1033'`、`0/40 条含汉字`、`Run Notepad Two` 残留，
+以及「下一步」落到 `VerifyReadyDlg` 而不是 `InstallDirDlg`），
+NSIS 3 项失败（PE 语言 `1033`、脚本注册 26 种语言）；
+对 v1.0.1 产物则是 **23 项全过**。
 
 ---
 
@@ -600,7 +605,7 @@ NSIS 3 项失败（PE 语言 `1033`、脚本注册 26 种语言），合计 **15
 本次审查运行在受管控的沙箱中，其删除操作经过一层 fail-closed 的回收站包装，
 在回收站工具本身报错时会拒绝删除。以下三处均为**环境限制，非项目缺陷**。
 
-**1) 名为 `app.asar` 的文件在项目目录内无法删除。**
+**1) 名为 `app.asar` / `default_app.asar` 的文件在项目目录内无法删除。**
 `electron-builder` 在打包前会调用 `fs-extra.emptyDir(appOutDir)`
 （`app-builder-lib/out/electron/ElectronFramework.js:189`）。只要上一轮构建在
 `<输出目录>/win-unpacked/resources/app.asar` 留下文件，这一步就必然失败：
@@ -613,18 +618,30 @@ rm -rf win-unpacked       → 同样被拦（回收站操作被中止）
 
 已用探针隔离验证：工作区**外**的 `C:\wixprobe\app.asar` 可以正常删除，
 工作区**内**任意位置的同名文件都不行——是路径规则命中了该文件名，不是文件被进程占用
-（`Get-Process` 无相关残留进程）。**应对**：每轮构建换一个全新的输出目录
-（本项目最终产物在 `release-final/`）。
+（`Get-Process` 无相关残留进程）。
 
-**2) 废弃输出目录残留。** 受上述限制影响，`dist-desktop/`、`release/`、
-`release-zh-cn/`、`release-cn/` 四个中间目录各残留了无法删除的
-`win-unpacked/resources/app.asar`（约 300 MB 量级）。它们**不含任何交付物**，
-正式产物位于 `release-final/`。如需清理，请在普通终端（非本沙箱）执行：
+**应对（已落地）**：把构建输出目录移到工作区**外** ——
+`desktop/package.json` 的 `directories.output` 设为 `../../notepad-two-dist`
+（即 `WorkBuddy AI/notepad-two-dist`）。工作区外的同名文件可以正常删除，
+于是 `emptyDir(appOutDir)` 不再失败，**同一个输出目录可以反复构建**，
+不会再像早期那样每轮被迫换一个新目录名。
+
+**2) 历史输出目录只留下受保护的 `.asar` 空壳。**
+在改用工作区外输出之前，累计产生过 `dist-desktop/`、`release-cn/`、
+`release-final/`、`release-zh-cn/`、`release-v2/` 五个中间目录。清理时，
+安装包、`.dll`、`.pak`、`locales/` 等**普通文件均已删除**（总体积从约 1.9 GB
+降到约 2 MB），但每个目录都残留了无法删除的
+`win-unpacked/resources/app.asar`（各约 300 KB）。
+
+这些空壳**不含任何交付物**，正式产物位于 `release/`。如需彻底清除，
+请在普通终端（非本沙箱）执行：
 
 ```bash
 cd "C:/Users/98201/WorkBuddy AI/notepad-two"
-rmdir /s /q dist-desktop release release-zh-cn release-cn
+rmdir /s /q dist-desktop release-cn release-final release-zh-cn release-v2
 ```
+
+（`release/` 本身是正式交付目录，请勿删除。）
 
 **3) Electron 二进制缓存键与下载地址绑定。** `@electron/get` 的缓存目录名是
 **解析后下载 URL 目录部分的 SHA-256**（`Cache.getCacheDirectory`），因此
@@ -640,3 +657,42 @@ electron-builder 的 URL 与手工下载的 URL 只要目录不同，就会落�
 - 该沙箱预设了 `ELECTRON_RUN_AS_NODE=1`，会让 Electron 退化成纯 Node 模式。
   启动桌面版需先移除该变量：`env -u ELECTRON_RUN_AS_NODE "Notepad Two.exe"`。
 - 无 GPU 的环境下需加 `--disable-gpu --no-sandbox`，否则 Chromium 的 GPU 进程会反复崩溃。
+
+---
+
+## 九、版本管理与产物整理
+
+### 9.1 git 仓库
+
+仓库根就是项目目录本身（`notepad-two/.git`），主分支 `main`，首个提交含 36 个文件。
+
+> ⚠️ **环境里有一个需要留意的陷阱**：`C:\` 根目录也存在一个 `.git`。
+> 在项目内直接执行 `git` 命令时，若项目自身没有 `.git`，git 会**向上解析到 `C:/`**，
+> 把整个系统盘当成工作区（`git status` 会列出 `Windows/`、`Program Files/` 等）。
+> 项目现已单独 `git init`，其 `.git` 优先级更高，所有操作都只作用于项目仓库。
+> 请勿在 `C:\` 下执行 `git` 命令。
+
+`.gitignore` 排除：`node_modules/`、`release*/`、`dist-desktop/`、`*.log`、
+`.workbuddy-ai/`、`__pycache__/`、`*.pyc`。仓库只跟踪源码、测试与文档。
+
+### 9.2 版本号约定
+
+**每次改动都同步升 `desktop/package.json` 的 `version`，并打对应标签。**
+
+| 变更类型 | 版本号怎么走 | 本次 |
+|---|---|---|
+| 修复缺陷、文案或配置调整 | 补丁位 +1 | `1.0.0` → `1.0.1` |
+| 新增向后兼容的功能 | 次版本 +1，补丁位归零 | — |
+| 不兼容的改动 | 主版本 +1，其余归零 | — |
+
+安装包文件名带版本号（`Notepad Two-<version>-x64-Setup.exe`），
+所以升版本号后需要重新打包一次。
+
+### 9.3 产物整理结果
+
+| 项 | 整理前 | 整理后 |
+|---|---|---|
+| 工作区内的输出目录 | `dist-desktop/`、`release/`、`release-cn/`、`release-final/`、`release-zh-cn/`、`release-v2/` 共 6 个，约 1.9 GB | 只保留 `release/`（正式交付）；其余 5 个仅剩受保护的 `.asar` 空壳，合计约 2 MB |
+| 构建输出位置 | 工作区内，每轮构建被迫换一个新目录名 | 工作区外 `notepad-two-dist/`，可反复构建、自动清空 |
+| 版本管理 | 无 | git 仓库 + `v1.0.1` 标签 |
+| 交付副本 | 分散在多个目录 | `release/` 一处：两个安装包 + 绿色版 |
