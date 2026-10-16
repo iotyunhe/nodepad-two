@@ -207,8 +207,10 @@ try { result = cmd.run(args || {}, this); } catch (err) { ... }
 | 构建脚本依赖 | 仅 Python 标准库（`os` / `re` / `sys`） |
 | 测试依赖 | 仅 Node 标准库 |
 
-`src/` 下 13 个模块（12 个 JS + 1 个 CSS）经 `build.py` 内联为单文件 `dist/notepad-two.html`（273.9 KB），
+`src/` 下 13 个模块（12 个 JS + 1 个 CSS）经 `build.py` 内联为单文件 `dist/notepad-two.html`（~274 KB），
 可直接 `file://` 打开，无需任何本地服务器。
+**`build.py` 在构建时会读取 `desktop/package.json` 的 `version`，并自动替换 `src/00-core.js` 中的
+`NT.version` 字面量，确保运行时版本号与安装包版本一致。**
 
 ---
 
@@ -240,8 +242,8 @@ try { result = cmd.run(args || {}, this); } catch (err) { ... }
 
 | 测试 | 结果 |
 |---|---|
-| `test/core.test.js`（Node） | **87 / 87 通过**（原 61 + 本次新增 26） |
-| `test/browser.test.html`（无头 Chrome） | **93 / 93 通过** |
+| `test/core.test.js`（Node） | **89 / 89 通过**（含版本号一致性断言） |
+| `test/browser.test.html`（Chrome） | **92 / 93 通过**；1 项为环境敏感的 perf 哨兵（Chrome 132+ 已移除 `--virtual-time-budget`，真实耗时受无头环境负载影响） |
 | `test/bench-largefile.js` | 复杂度检查通过，无超线性退化 |
 | `test/localization.test.js`（中文化 + 目录页回归） | **33 / 33 通过** |
 | `test/verify-installer-zh.py`（安装包语言与安装路径） | **23 / 23 通过**；反向对照旧产物 13 项失败 |
@@ -682,6 +684,16 @@ electron-builder 的 URL 与手工下载的 URL 只要目录不同，就会落�
 ### 9.2 版本号约定
 
 **每次改动都同步升 `desktop/package.json` 的 `version`，并打对应标签。**
+
+已提供 `bump-version.js` 一键工具（同时修改 `package.json` 与 `src/00-core.js`）：
+
+```bash
+node bump-version.js patch     # 补丁位 +1
+node bump-version.js minor     # 次版本 +1
+node bump-version.js major     # 主版本 +1
+node bump-version.js 1.2.3     # 显式指定
+node bump-version.js --check   # 提交前校验一致性
+```
 
 | 变更类型 | 版本号怎么走 | 本次 |
 |---|---|---|

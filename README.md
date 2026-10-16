@@ -23,6 +23,16 @@ python -m http.server 8000
 
 **约定：每次改动都同步升 `desktop/package.json` 里的 `version`，并打对应标签。**
 
+一键升版本（会自动同步 `src/00-core.js`）：
+
+```bash
+node bump-version.js patch        # 补丁位 +1
+node bump-version.js minor        # 次版本 +1
+node bump-version.js major        # 主版本 +1
+node bump-version.js 1.2.3        # 直接指定
+node bump-version.js --check      # 校验两处版本号是否一致
+```
+
 | 变更类型 | 版本号怎么走 | 示例 |
 | --- | --- | --- |
 | 修复缺陷、文案或配置调整 | 补丁位 +1 | `1.0.0` → `1.0.1` |
@@ -50,7 +60,7 @@ python build.py     # 把 src/ 下的 13 个模块与样式内联进 dist/notepa
 ## 测试
 
 ```bash
-node test/core.test.js                  # 核心逻辑单测（87 项，无需浏览器）
+node test/core.test.js                  # 核心逻辑单测（89 项，无需浏览器）
 node test/bench-largefile.js 1000000    # 大文件基准（分阶段计时 + 复杂度断言）
 node test/localization.test.js          # 中文化 + 目录页回归（33 项，无需 Electron）
 ```
@@ -62,16 +72,10 @@ python test/verify-installer-zh.py "release/Notepad Two-1.0.1-x64.msi" \
                                    "release/Notepad Two-1.0.1-x64-Setup.exe"
 ```
 
-浏览器端到端测试：用 Chrome 打开 `test/browser.test.html`（93 项），
-或用无头模式跑并把 DOM 导出查看 `#testout`：
+浏览器端到端测试：用 Chrome 打开 `test/browser.test.html`（93 项，含大文件编辑场景）。
 
-```bash
-chrome --headless=new --window-size=1400,900 --virtual-time-budget=900000 \
-       --dump-dom test/browser.test.html
-```
-
-> 注意：无头模式下 `performance.now()` 受 `--virtual-time-budget` 虚拟化，
-> 页面里的耗时数字只作「没有挂死」的哨兵；权威性能数据看 `bench-largefile.js`。
+> 注意：Chrome 132+ 移除了旧版 headless， `--virtual-time-budget` 不再生效；
+> 页面里的耗时数字只作「没有挂死」的哨兵。权威性能数据看 `bench-largefile.js`。
 
 ## 功能一览
 
