@@ -163,7 +163,7 @@ define({
   已由模板补丁修正，验证器会用 `ControlEvent` 表重放一次「下一步」来确认落点。
 
 > **构建输出位置**：`desktop/package.json` 的 `directories.output` 指向
-> `../../notepad-two-dist`（即工作区**外**的 `WorkBuddy AI/notepad-two-dist`）。
+> `../../notepad-two-dist/<version>`（即工作区**外**的 `WorkBuddy AI/notepad-two-dist/1.0.1`）。
 > 这是因为 electron-builder 每次打包前会调用 `emptyDir(appOutDir)`，
 > 而本环境无法删除工作区内名为 `app.asar` 的文件 —— 输出到工作区外即可反复构建、
 > 不残留目录。`release/` 下的产物是从那里复制来的最终交付副本。

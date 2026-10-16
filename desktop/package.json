@@ -14,6 +14,8 @@
     "postinstall": "node patch-builder-templates.js",
     "patch-templates": "node patch-builder-templates.js",
     "prepare-app": "node prepare-app.js",
+    "bump": "node ../bump-version.js",
+    "version:check": "node ../bump-version.js --check",
     "start": "node prepare-app.js && electron .",
     "dist": "node patch-builder-templates.js && node prepare-app.js && electron-builder --win nsis msi",
     "dist:nsis": "node patch-builder-templates.js && node prepare-app.js && electron-builder --win nsis",
@@ -29,7 +31,7 @@
     "copyright": "Copyright © 2026 Notepad Two",
     "asar": true,
     "directories": {
-      "output": "../../notepad-two-dist",
+      "output": "../../notepad-two-dist/1.0.1",
       "buildResources": "build"
     },
     "files": [

@@ -1,4 +1,5 @@
 /* 核心模块单元测试（Node 运行，无需浏览器）：node test/core.test.js */
+const fs = require('fs');
 const path = require('path');
 // 必须严格按浏览器加载顺序引入：后面的模块在加载期就读取了前者的导出
 const NT = require(path.join(__dirname, '..', 'src', '00-core.js'));
@@ -14,6 +15,16 @@ function eq(actual, expected, name) {
   else { fail++; console.error(`✗ ${name}\n    期望: ${b}\n    实际: ${a}`); }
 }
 function ok(cond, name) { if (cond) pass++; else { fail++; console.error('✗ ' + name); } }
+
+/* --------------------------------------------------------- 版本号一致性（回归）
+ * 版本号曾经有两个来源（package.json 与 00-core.js），只改一处就会出现
+ * 「安装包 1.0.1、程序内显示 1.0.0」。这里把两处钉死，漂移立刻失败。 */
+{
+  const pkg = JSON.parse(fs.readFileSync(
+    path.join(__dirname, '..', 'desktop', 'package.json'), 'utf8'));
+  eq(NT.version, pkg.version, 'NT.version 与 desktop/package.json 版本号一致');
+  ok(/^\d+\.\d+\.\d+$/.test(NT.version), 'NT.version 形如 X.Y.Z（当前 ' + NT.version + '）');
+}
 
 /* ------------------------------------------------------------- Document */
 {
