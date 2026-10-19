@@ -31,7 +31,7 @@
     "copyright": "Copyright © 2026 Notepad Two",
     "asar": true,
     "directories": {
-      "output": "../../notepad-two-dist/1.0.1",
+      "output": "../../notepad-two-dist/1.0.2",
       "buildResources": "build"
     },
     "files": [
