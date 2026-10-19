@@ -63,14 +63,24 @@ def main():
         print('警告: 读不到 desktop/package.json 的 version，'
               'NT.version 将保持源码字面量', file=sys.stderr)
 
-    # 0) 把 CHANGELOG.md 注入产物：应用内「帮助 → 更新日志」直接读这份数据，
+    # 0) 把文档注入产物：应用内「帮助 → 更新日志 / 开源许可」直接读这份数据，
     #    保证仓库里的文档和界面上看到的永远是同一份内容。
-    changelog_path = os.path.join(ROOT, 'CHANGELOG.md')
-    has_changelog = os.path.exists(changelog_path)
-    if has_changelog:
-        payload = json.dumps(read(changelog_path), ensure_ascii=False).replace('</', '<\\/')
-        inject = ('<script>window.__NT_CHANGELOG__ = ' + payload + ';</script>\n')
-        html = html.replace('</head>', inject + '</head>', 1)
+    DOCS = [
+        ('CHANGELOG.md', '__NT_CHANGELOG__', '更新日志'),
+        ('THIRD-PARTY-NOTICES.md', '__NT_NOTICES__', '开源许可'),
+    ]
+    doc_status = []
+    for fname, global_name, label in DOCS:
+        fpath = os.path.join(ROOT, fname)
+        if os.path.exists(fpath):
+            payload = json.dumps(read(fpath), ensure_ascii=False).replace('</', '<\\/')
+            html = html.replace(
+                '</head>',
+                '<script>window.' + global_name + ' = ' + payload + ';</script>\n</head>',
+                1)
+            doc_status.append(label + ' 已注入')
+        else:
+            doc_status.append(label + ' 缺失')
 
     # 1) 内联样式
     def inline_css(m):
@@ -107,7 +117,7 @@ def main():
 
     size = os.path.getsize(OUT)
     print('内联样式 %d 个、脚本 %d 个' % (n_css, n_js))
-    print('更新日志: %s' % ('已注入 CHANGELOG.md' if has_changelog else '未找到 CHANGELOG.md'))
+    print('文档注入: %s' % ('、'.join(doc_status)))
     if app_version:
         if n_ver == 0:
             print('警告: 未在源码中找到 NT.version 赋值，版本号未被写入',

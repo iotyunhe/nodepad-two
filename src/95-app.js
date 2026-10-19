@@ -356,6 +356,7 @@
         help: [
           mi('help', '快捷键总览', 'help.shortcuts'),
           mi('help', '更新日志', 'help.changelog'),
+          mi('help', '开源许可', 'help.notices'),
           mi('help', '关于 Notepad Two', 'help.about')
         ]
       };
@@ -1861,6 +1862,26 @@
             ? NT.markdown.render(src)
             : '<pre style="white-space:pre-wrap">' + U.esc(src) + '</pre>';
           this.el.overlayCard.innerHTML = '<h3>更新日志 · 当前版本 v' + NT.version + '</h3>' +
+            '<div class="md-preview-body" style="max-height:62vh;overflow:auto;padding:0 6px 0 0">' +
+            body + '</div>' +
+            '<div class="oactions"><button class="btn primary" data-r="ok">关闭</button></div>';
+          this.el.overlay.hidden = false;
+          this.el.overlayCard.querySelector('[data-r]').addEventListener('click', () => {
+            this.el.overlay.hidden = true;
+          });
+        } });
+
+      C({ id: 'help.notices', title: '开源许可', category: '帮助',
+        run: () => {
+          const src = global.__NT_NOTICES__ || '';
+          if (!src) {
+            this.toast('开发态未注入开源声明，请查看项目根目录的 THIRD-PARTY-NOTICES.md', 'warn');
+            return;
+          }
+          const body = (NT.markdown && NT.markdown.render)
+            ? NT.markdown.render(src)
+            : '<pre style="white-space:pre-wrap">' + U.esc(src) + '</pre>';
+          this.el.overlayCard.innerHTML = '<h3>开源许可与第三方声明</h3>' +
             '<div class="md-preview-body" style="max-height:62vh;overflow:auto;padding:0 6px 0 0">' +
             body + '</div>' +
             '<div class="oactions"><button class="btn primary" data-r="ok">关闭</button></div>';

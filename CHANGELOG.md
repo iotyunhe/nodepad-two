@@ -10,6 +10,19 @@
 
 ---
 
+## [1.1.3] — 2026-10-19
+
+### 新增
+- 新增 [LICENSE](LICENSE)（MIT）与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)：
+  列明随安装包分发的 Electron / Chromium / Node.js / V8 / FFmpeg / ICU / ANGLE，
+  以及构建期使用的 electron-builder / NSIS / WiX / 7-Zip 的版本、许可证与项目地址。
+- 程序内新增 **帮助 → 开源许可**，构建时把上述声明注入产物后渲染展示。
+
+### 变更
+- README 补充仓库地址、克隆命令与「开源声明」章节；安装包文件名统一到当前版本。
+
+---
+
 ## [1.1.2] — 2026-10-19
 
 ### 新增

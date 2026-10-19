@@ -1,7 +1,17 @@
 # Notepad Two
 
 一个对标 Notepad++ 的文本编辑器内核，**原生 Web 技术实现，零运行时依赖**。
-架构设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，代码审查与打包说明见 [AUDIT.md](AUDIT.md)。
+架构设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，代码审查与打包说明见 [AUDIT.md](AUDIT.md)，
+版本改动见 [CHANGELOG.md](CHANGELOG.md)。
+
+仓库地址：<https://github.com/iotyunhe/nodepad-two>
+
+```bash
+git clone https://github.com/iotyunhe/nodepad-two.git
+cd nodepad-two
+```
+
+许可证：[MIT](LICENSE) · 第三方组件声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
 
 ## 运行
 
@@ -14,7 +24,7 @@ python -m http.server 8000
 # 然后访问 http://localhost:8000/index.html
 ```
 
-**方式三（桌面版）**：安装 `release/Notepad Two-1.0.1-x64-Setup.exe`，
+**方式三（桌面版）**：安装 `release/Notepad Two-1.1.2-x64-Setup.exe`，
 或直接运行 `release/win-unpacked/Notepad Two.exe`。详见下方「桌面版」。
 
 ## 版本管理
@@ -71,8 +81,8 @@ node test/localization.test.js          # 中文化 + 目录页回归（33 项�
 安装包语言实测（MSI 通过 `msi.dll` 读取，NSIS 通过生成脚本断言）：
 
 ```bash
-python test/verify-installer-zh.py "release/Notepad Two-1.0.1-x64.msi" \
-                                   "release/Notepad Two-1.0.1-x64-Setup.exe"
+python test/verify-installer-zh.py "release/Notepad Two-1.1.2-x64.msi" \
+                                   "release/Notepad Two-1.1.2-x64-Setup.exe"
 ```
 
 浏览器端到端测试：用 Chrome 打开 `test/browser.test.html`（93 项，含大文件编辑场景）。
@@ -181,8 +191,8 @@ define({
 
 | 产物 | 体积 | 用途 |
 | --- | --- | --- |
-| `release/Notepad Two-1.0.1-x64-Setup.exe` | 89.7 MB | NSIS 安装程序，图形化向导、**可选安装目录**、自动建快捷方式。**个人用户首选** |
-| `release/Notepad Two-1.0.1-x64.msi` | 103.6 MB | MSI 标准安装包，**可选安装目录**，支持 `msiexec /qn` 静默安装与组策略/SCCM 分发。**企业批量部署** |
+| `release/Notepad Two-1.1.2-x64-Setup.exe` | 89.7 MB | NSIS 安装程序，图形化向导、**可选安装目录**、自动建快捷方式。**个人用户首选** |
+| `release/Notepad Two-1.1.2-x64.msi` | 103.6 MB | MSI 标准安装包，**可选安装目录**，支持 `msiexec /qn` 静默安装与组策略/SCCM 分发。**企业批量部署** |
 | `release/win-unpacked/` | 325 MB | 免安装绿色版，解压即用（体积主要是 Electron 自身的 210 MB 单体 exe + 44 MB `locales/`） |
 
 两者均为**按用户安装**（`perMachine: false`），安装过程**不需要管理员权限**，
@@ -196,7 +206,7 @@ define({
   已由模板补丁修正，验证器会用 `ControlEvent` 表重放一次「下一步」来确认落点。
 
 > **构建输出位置**：`desktop/package.json` 的 `directories.output` 指向
-> `../../notepad-two-dist/<version>`（即工作区**外**的 `WorkBuddy AI/notepad-two-dist/1.0.1`）。
+> `../../notepad-two-dist/<version>`（即工作区**外**的 `WorkBuddy AI/notepad-two-dist/1.1.2`）。
 > 这是因为 electron-builder 每次打包前会调用 `emptyDir(appOutDir)`，
 > 而本环境无法删除工作区内名为 `app.asar` 的文件 —— 输出到工作区外即可反复构建、
 > 不残留目录。`release/` 下的产物是从那里复制来的最终交付副本。
@@ -229,8 +239,8 @@ define({
 `npm run dist` 也会先跑一遍。校验安装包语言：
 
 ```bash
-python test/verify-installer-zh.py "release/Notepad Two-1.0.1-x64.msi" \
-                                   "release/Notepad Two-1.0.1-x64-Setup.exe"
+python test/verify-installer-zh.py "release/Notepad Two-1.1.2-x64.msi" \
+                                   "release/Notepad Two-1.1.2-x64-Setup.exe"
 ```
 
 > NSIS 的语言表被压在数据块里（不可明文检索），因此验证器断言的是
@@ -284,4 +294,24 @@ env -u ELECTRON_RUN_AS_NODE "Notepad Two.exe" --smoke-test --smoke-out=result.js
 - **F12** 打开开发者工具（应用未占用该键，因此无需引入原生菜单栏）。
 
 安全基线：`contextIsolation: true`、`nodeIntegration: false`、禁页面导航、
-禁权限请求、外链交由系统浏览器打开。
+仅放行剪贴板权限（其余一律拒绝）、外链交由系统浏览器打开。
+
+## 开源声明
+
+本项目**应用源代码**以 [MIT 许可证](LICENSE) 发布，Copyright (c) 2026 iotyunhe。
+
+安装包里分发的二进制主要来自 **Electron 38.8.6**（MIT），其中内含
+**Chromium**（BSD 3-Clause）、**Node.js**（MIT）、**V8**（BSD 3-Clause）、
+**FFmpeg**（LGPL 2.1）、**ICU**、**ANGLE** 等组件，各自遵循原许可证。
+构建期还用到 **electron-builder**（MIT）、**NSIS**（zlib/libpng）、
+**WiX Toolset**（MS-RL）、**7-Zip**（LGPL 2.1）。
+
+完整的组件清单、版本、许可证与项目地址见
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)，
+也可以在程序里打开 **帮助 → 开源许可** 查看（构建时会注入同一份文件）。
+
+几点需要说明的是：编辑器内核、分词高亮规则、Markdown 渲染器、宏引擎、
+插件宿主全部为自行实现，**没有引入** CodeMirror / Monaco / Ace / marked /
+highlight.js 等第三方库；运行时 `dependencies` 为空，`electron` 与
+`electron-builder` 只作为开发依赖存在。
+
