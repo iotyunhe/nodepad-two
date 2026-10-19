@@ -27,7 +27,7 @@ const ROOT = __dirname;
 const PKG = path.join(ROOT, 'desktop', 'package.json');
 const CORE = path.join(ROOT, 'src', '00-core.js');
 const VERSION_RE = /(NT\.version\s*=\s*)'[^']*'/;
-const OUTPUT_RE = /("output"\s*:\s*"[^"]*\/notepad-two-dist\/)\d+\.\d+\.\d+("/)?/;
+const OUTPUT_RE = /(notepad-two-dist\/)\d+\.\d+\.\d+/;
 
 function die(msg) {
   console.error('✗ ' + msg);
@@ -85,8 +85,8 @@ if (after === before) die(`目标版本与当前版本相同（${after}），无
 const pkgText = fs.readFileSync(PKG, 'utf8');
 let pkgNew = pkgText.replace(/("version"\s*:\s*")[^"]*(")/, `$1${after}$2`);
 if (pkgNew === pkgText) die('未能在 desktop/package.json 中定位到 version 字段');
-// 同步更新构建输出目录版本号
-pkgNew = pkgNew.replace(OUTPUT_RE, `$1${after}$2`);
+// 同步更新构建输出目录版本号（../../notepad-two-dist/<version>）
+pkgNew = pkgNew.replace(OUTPUT_RE, '$1' + after);
 fs.writeFileSync(PKG, pkgNew, 'utf8');
 
 /* 2) src/00-core.js */

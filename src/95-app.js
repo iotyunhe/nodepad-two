@@ -214,7 +214,7 @@
         wordWrap: false, showLineNumbers: true, highlightCurrentLine: true,
         fontSize: 13, theme: 'light', macroDelay: 30, autoComplete: true,
         lightweightLines: 120000, lightweightBytes: 4 * 1024 * 1024,
-        showSidebar: true, mdPreviewWidth: 0
+        showSidebar: true, mdPreviewWidth: 0, mdAutoPreview: true
       };
       try {
         const raw = localStorage.getItem(LS_KEY);
@@ -312,6 +312,9 @@
             checked: () => this.preview && this.preview.mode === 'read'
           }),
           mi('view', '导出为 HTML…', 'md.exportHtml'),
+          mi('view', '打开 Markdown 时自动分栏', 'md.toggleAutoPreview', {
+            checked: () => this.settings.mdAutoPreview !== false
+          }),
           { sep: true },
           mi('view', '放大字号', 'view.zoomIn'), mi('view', '缩小字号', 'view.zoomOut'),
           mi('view', '重置字号', 'view.zoomReset'),
@@ -1675,6 +1678,14 @@
       C({ id: 'md.exportHtml', title: '导出为 HTML…', category: 'Markdown',
         enabled: mdOn,
         run: () => this.preview.exportHtml() });
+
+      C({ id: 'md.toggleAutoPreview', title: '打开 Markdown 时自动分栏', category: 'Markdown',
+        run: () => {
+          this.settings.mdAutoPreview = this.settings.mdAutoPreview === false;
+          this.saveSettings();
+          this.toast(this.settings.mdAutoPreview ? '已开启：打开 .md 自动分栏预览' : '已关闭：打开 .md 保持源码编辑', 'ok');
+          if (this.settings.mdAutoPreview && this.preview && mdOn()) this.preview.setMode('split');
+        } });
 
       /* 行内格式化：包裹选区（无选区时插入一对标记并把光标放中间） */
       const wrap = (left, right, placeholder) => () => {

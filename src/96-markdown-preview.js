@@ -330,10 +330,22 @@ body.md-export .md-preview-body {
     /** 切换标签页时同步模式（每个标签页各自记住自己的阅读状态） */
     onTabChange(tab) {
       if (!this.pane) return;
+      const doc = tab && tab.doc;
+      const isMd = this.isMarkdown(doc);
       let mode = tab && tab.mdMode;
-      if (!mode) mode = this.isMarkdown(tab && tab.doc) ? 'edit' : 'edit';
-      if (mode !== 'edit' && !this.isMarkdown(tab && tab.doc)) mode = 'edit';
+
+      // 首次打开这个标签：按设置决定是否自动进入分栏预览
+      if (!mode) {
+        const auto = !this.app.settings || this.app.settings.mdAutoPreview !== false;
+        // 超大文件或轻量模式不做实时渲染，避免卡顿
+        const tooBig = !!doc && (doc.length > 2 * 1024 * 1024 ||
+          (this.app.view && this.app.view.lightweight));
+        mode = (isMd && auto && !tooBig) ? 'split' : 'edit';
+      }
+      if (mode !== 'edit' && !isMd) mode = 'edit';
+
       this.mode = mode;
+      if (tab) tab.mdMode = mode;
       this.applyMode();
       this.refresh(true);
     }
