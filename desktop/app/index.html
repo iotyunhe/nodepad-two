@@ -349,8 +349,28 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 .sidebar {
   width: 320px; flex: none; display: flex; flex-direction: column;
   background: var(--bg-panel); border-left: 1px solid var(--border);
+  overflow: hidden; transition: width .16s ease, opacity .16s ease;
 }
-.sidebar.hidden { display: none; }
+/* 收起时不是 display:none，而是把宽度收到 0，配合 transition 平滑滑出 */
+.sidebar.hidden { width: 0; opacity: 0; border-left-width: 0; pointer-events: none; }
+.sidebar.hidden > * { visibility: hidden; }
+
+/* 侧边栏收起后仍保留的一条竖向「把手」，点一下即可拉出面板 */
+.sidebar-rail {
+  flex: none; width: 22px; display: flex; flex-direction: column; align-items: center;
+  padding: 6px 0 12px; gap: 4px; background: var(--bg-panel);
+  border-left: 1px solid var(--border); cursor: pointer; user-select: none;
+  color: var(--fg-faint); transition: color .12s, background .12s;
+}
+.sidebar-rail:hover { color: var(--accent); background: rgba(127, 127, 127, .10); }
+.sidebar-rail .rail-toggle {
+  width: 100%; padding: 2px 0; border: 0; background: transparent;
+  color: inherit; font-size: 14px; line-height: 1; cursor: pointer;
+}
+.sidebar-rail .rail-label {
+  writing-mode: vertical-rl; text-orientation: mixed;
+  letter-spacing: 3px; font-size: 11.5px; margin-top: 2px;
+}
 .sidebar-tabs { display: flex; border-bottom: 1px solid var(--border); flex: none; }
 .sidebar-tabs button {
   flex: 1; padding: 8px 4px; border: 0; background: transparent;
@@ -547,6 +567,10 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       <div class="sidebar-tabs" id="sidebarTabs"></div>
       <div class="sidebar-body" id="sidebarBody"></div>
     </div>
+    <div class="sidebar-rail" id="sidebarRail" title="展开/收起侧边栏 (Ctrl+B)">
+      <button type="button" class="rail-toggle" id="railToggle" aria-label="展开或收起侧边栏">‹</button>
+      <span class="rail-label">面板</span>
+    </div>
   </div>
   <div class="statusbar" id="statusbar"></div>
   <div class="findbar" id="findbar" hidden></div>
@@ -574,7 +598,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
    *   · 改版本请用 `node bump-version.js patch|minor|major|X.Y.Z`（会同时改这里）；
    *   · build.py 打包时还会用 package.json 覆盖此字面量，确保交付产物一定正确；
    *   · core.test.js 有一条断言校验此处与 package.json 一致，漂移会被测出来。*/
-  NT.version = '1.1.0';
+  NT.version = '1.1.1';
 
   /* ------------------------------------------------------------------ 事件总线
    * 全局单例。约定的事件名（节选）：
@@ -5265,12 +5289,20 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         wordWrap: false, showLineNumbers: true, highlightCurrentLine: true,
         fontSize: 13, theme: 'light', macroDelay: 30, autoComplete: true,
         lightweightLines: 120000, lightweightBytes: 4 * 1024 * 1024,
-        showSidebar: true, mdPreviewWidth: 0, mdAutoPreview: true
+        showSidebar: false, mdPreviewWidth: 0, mdAutoPreview: true
       };
+      let s = def;
       try {
         const raw = localStorage.getItem(LS_KEY);
-        return raw ? Object.assign(def, JSON.parse(raw)) : def;
-      } catch (e) { return def; }
+        s = raw ? Object.assign(def, JSON.parse(raw)) : def;
+      } catch (e) { s = def; }
+      // 一次性迁移（v1.1.1）：侧边栏改为默认收起，老配置里的展开状态收起来一次
+      if (!s.sidebarCollapsedOnce) {
+        s.showSidebar = false;
+        s.sidebarCollapsedOnce = true;
+        try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch (e) {}
+      }
+      return s;
     }
     saveSettings() {
       try { localStorage.setItem(LS_KEY, JSON.stringify(this.settings)); } catch (e) {}
@@ -5280,6 +5312,10 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       document.documentElement.style.setProperty('--nt-font-size', this.settings.fontSize + 'px');
       document.documentElement.style.setProperty('--nt-font-size-ui', this.settings.fontSize + 'px');
       document.getElementById('sidebar').classList.toggle('hidden', !this.settings.showSidebar);
+      const railToggle = document.getElementById('railToggle');
+      const rail = document.getElementById('sidebarRail');
+      if (railToggle) railToggle.textContent = this.settings.showSidebar ? '›' : '‹';
+      if (rail) rail.title = (this.settings.showSidebar ? '收起' : '展开') + '侧边栏 (Ctrl+B)';
       if (this.view) { this.view._measure(); this.view.render(true); }
     }
 
@@ -5301,6 +5337,9 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         overlay: document.getElementById('overlay'),
         overlayCard: document.getElementById('overlayCard')
       };
+      // 右侧竖向把手：点一下就展开/收起侧边栏
+      const rail = document.getElementById('sidebarRail');
+      if (rail) rail.addEventListener('click', () => this.exec('view.toggleSidebar'));
       this._buildMenus();
       this._buildFindbar();
       this._buildPalette();

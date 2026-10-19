@@ -341,8 +341,28 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 .sidebar {
   width: 320px; flex: none; display: flex; flex-direction: column;
   background: var(--bg-panel); border-left: 1px solid var(--border);
+  overflow: hidden; transition: width .16s ease, opacity .16s ease;
 }
-.sidebar.hidden { display: none; }
+/* 收起时不是 display:none，而是把宽度收到 0，配合 transition 平滑滑出 */
+.sidebar.hidden { width: 0; opacity: 0; border-left-width: 0; pointer-events: none; }
+.sidebar.hidden > * { visibility: hidden; }
+
+/* 侧边栏收起后仍保留的一条竖向「把手」，点一下即可拉出面板 */
+.sidebar-rail {
+  flex: none; width: 22px; display: flex; flex-direction: column; align-items: center;
+  padding: 6px 0 12px; gap: 4px; background: var(--bg-panel);
+  border-left: 1px solid var(--border); cursor: pointer; user-select: none;
+  color: var(--fg-faint); transition: color .12s, background .12s;
+}
+.sidebar-rail:hover { color: var(--accent); background: rgba(127, 127, 127, .10); }
+.sidebar-rail .rail-toggle {
+  width: 100%; padding: 2px 0; border: 0; background: transparent;
+  color: inherit; font-size: 14px; line-height: 1; cursor: pointer;
+}
+.sidebar-rail .rail-label {
+  writing-mode: vertical-rl; text-orientation: mixed;
+  letter-spacing: 3px; font-size: 11.5px; margin-top: 2px;
+}
 .sidebar-tabs { display: flex; border-bottom: 1px solid var(--border); flex: none; }
 .sidebar-tabs button {
   flex: 1; padding: 8px 4px; border: 0; background: transparent;

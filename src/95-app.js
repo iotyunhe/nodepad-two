@@ -214,12 +214,20 @@
         wordWrap: false, showLineNumbers: true, highlightCurrentLine: true,
         fontSize: 13, theme: 'light', macroDelay: 30, autoComplete: true,
         lightweightLines: 120000, lightweightBytes: 4 * 1024 * 1024,
-        showSidebar: true, mdPreviewWidth: 0, mdAutoPreview: true
+        showSidebar: false, mdPreviewWidth: 0, mdAutoPreview: true
       };
+      let s = def;
       try {
         const raw = localStorage.getItem(LS_KEY);
-        return raw ? Object.assign(def, JSON.parse(raw)) : def;
-      } catch (e) { return def; }
+        s = raw ? Object.assign(def, JSON.parse(raw)) : def;
+      } catch (e) { s = def; }
+      // 一次性迁移（v1.1.1）：侧边栏改为默认收起，老配置里的展开状态收起来一次
+      if (!s.sidebarCollapsedOnce) {
+        s.showSidebar = false;
+        s.sidebarCollapsedOnce = true;
+        try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch (e) {}
+      }
+      return s;
     }
     saveSettings() {
       try { localStorage.setItem(LS_KEY, JSON.stringify(this.settings)); } catch (e) {}
@@ -229,6 +237,10 @@
       document.documentElement.style.setProperty('--nt-font-size', this.settings.fontSize + 'px');
       document.documentElement.style.setProperty('--nt-font-size-ui', this.settings.fontSize + 'px');
       document.getElementById('sidebar').classList.toggle('hidden', !this.settings.showSidebar);
+      const railToggle = document.getElementById('railToggle');
+      const rail = document.getElementById('sidebarRail');
+      if (railToggle) railToggle.textContent = this.settings.showSidebar ? '›' : '‹';
+      if (rail) rail.title = (this.settings.showSidebar ? '收起' : '展开') + '侧边栏 (Ctrl+B)';
       if (this.view) { this.view._measure(); this.view.render(true); }
     }
 
@@ -250,6 +262,9 @@
         overlay: document.getElementById('overlay'),
         overlayCard: document.getElementById('overlayCard')
       };
+      // 右侧竖向把手：点一下就展开/收起侧边栏
+      const rail = document.getElementById('sidebarRail');
+      if (rail) rail.addEventListener('click', () => this.exec('view.toggleSidebar'));
       this._buildMenus();
       this._buildFindbar();
       this._buildPalette();
