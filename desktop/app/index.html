@@ -574,7 +574,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
    *   · 改版本请用 `node bump-version.js patch|minor|major|X.Y.Z`（会同时改这里）；
    *   · build.py 打包时还会用 package.json 覆盖此字面量，确保交付产物一定正确；
    *   · core.test.js 有一条断言校验此处与 package.json 一致，漂移会被测出来。*/
-  NT.version = '1.0.1';
+  NT.version = '1.0.2';
 
   /* ------------------------------------------------------------------ 事件总线
    * 全局单例。约定的事件名（节选）：
@@ -3008,6 +3008,474 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 
 </script>
 <script>
+/* ==== src/45-markdown.js ==== */
+/* ============================================================================
+ * 45-markdown.js — Markdown 渲染器（零依赖、无 DOM）
+ *
+ * 为什么自己写而不引第三方库：
+ *   1. 项目承诺「零运行时依赖」，交付物是单文件 HTML，不能有 node_modules；
+ *   2. 渲染结果要直接塞进 innerHTML，安全性必须自己完全掌控
+ *      （任何一处 URL 没过滤就是 XSS 入口）；
+ *   3. 阅读模式需要「源码行号 ↔ 渲染块」的映射来做滚动同步，
+ *      第三方库不提供这个信息，只能自己在块级元素上打 data-line。
+ *
+ * 支持范围（GFM 常用子集）：
+ *   块级：ATX/Setext 标题、段落、围栏代码块、引用、有序/无序/嵌套列表、
+ *         任务列表、表格（含对齐）、分隔线、引用式链接定义
+ *   行内：行内代码、粗体、斜体、删除线、图片、链接、自动链接、硬换行、反斜杠转义
+ *
+ * 明确不支持（避免过度承诺）：内联 HTML 透传（一律转义，杜绝 XSS）、
+ *   脚注、数学公式、目录自动生成。
+ *
+ * 安全约定：
+ *   · 所有文本先 esc() 再拼标签；
+ *   · 链接/图片的 URL 经 safeUrl() 过滤，javascript:/vbscript:/data:(非图片) 一律降级为 #；
+ *   · 渲染出的 HTML 不含任何事件属性，也不含 <script>/<style>/<iframe>。
+ * ========================================================================== */
+(function (global) {
+  'use strict';
+
+  const NT = global.NT || (global.NT = {});
+
+  /* ------------------------------------------------------------------ 基础 */
+
+  const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ESC_MAP[c]);
+  }
+
+  /** URL 白名单过滤。返回可直接写进 href/src 的字符串（已转义）。 */
+  function safeUrl(raw) {
+    const u = String(raw == null ? '' : raw).trim().replace(/^<|>$/g, '');
+    if (!u) return '';
+    // 允许 data:image/*（内联小图标），其余 data: 一律拒绝
+    if (/^data:/i.test(u) && !/^data:image\//i.test(u)) return '#';
+    if (/^(?:javascript|vbscript|file)\s*:/i.test(u)) return '#';
+    return esc(u);
+  }
+
+  const MD_EXT_RE = /\.(md|markdown|mdx|mkd|mkdn|mdwn)$/i;
+
+  /** 判断一个文档是不是 Markdown（按语言 id 或文件名后缀） */
+  function isMarkdown(doc) {
+    if (!doc) return false;
+    if (doc.language === 'markdown') return true;
+    return MD_EXT_RE.test(String(doc.name || ''));
+  }
+
+  /* -------------------------------------------------------------- 行内解析 */
+
+  const RE_REF_DEF = /^ {0,3}\[([^\]]+)\]:[ \t]*(\S+)(?:[ \t]+"([^"]*)")?[ \t]*$/;
+
+  function collectRefs(items) {
+    const refs = Object.create(null);
+    for (const it of items) {
+      const m = RE_REF_DEF.exec(it.t);
+      if (!m) continue;
+      const key = m[1].toLowerCase().replace(/\s+/g, ' ');
+      refs[key] = { url: m[2], title: m[3] || '' };
+    }
+    return refs;
+  }
+
+  /**
+   * 行内渲染。
+   * 用「占位符槽」策略避免转义/嵌套互相破坏：
+   *   先把代码、转义、链接等替换成 \u0000N\u0000，再对剩余文本做 HTML 转义
+   *   与强调符替换，最后把槽位还原。这样 **`a<b`** 里的 < 既不会被当成标签，
+   *   也不会影响外层 ** 的匹配。
+   */
+  function inline(text, ctx) {
+    if (text == null || text === '') return '';
+    const slots = [];
+    const put = (html) => '\u0000' + (slots.push(html) - 1) + '\u0000';
+    let s = String(text);
+
+    // 1) 行内代码：最先处理，其内部不再解析任何标记。
+    //    (?<!\\) 保证「被反斜杠转义的反引号」不会被当成代码围栏——
+    //    否则 `\`a\`` 会先被误配成代码，转义规则就失效了。
+    s = s.replace(/(?<!\\)(`+)([\s\S]*?)\1/g, (m0, ticks, code) => {
+      let c = code;
+      if (c.length > 1 && c.charAt(0) === ' ' && c.charAt(c.length - 1) === ' ') {
+        c = c.slice(1, -1);
+      }
+      return put('<code class="md-code-inline">' + esc(c) + '</code>');
+    });
+
+    // 2) 反斜杠转义：\* \_ \[ ... 都变成字面量
+    s = s.replace(/\\([\\`*_{}\[\]()#+\-.!>~|"'])/g, (m0, ch) => put(esc(ch)));
+
+    // 3) 自动链接 <https://...> 与 <a@b.com>
+    s = s.replace(/<((?:https?|ftp|mailto):[^>\s]+)>/gi, (m0, url) =>
+      put('<a class="md-link" href="' + safeUrl(url) + '" target="_blank" rel="noopener noreferrer">' +
+        esc(url) + '</a>'));
+    s = s.replace(/<([\w.+-]+@[\w-]+\.[\w.-]+)>/g, (m0, mail) =>
+      put('<a class="md-link" href="mailto:' + esc(mail) + '">' + esc(mail) + '</a>'));
+
+    // 4) 图片 ![alt](src "title")
+    s = s.replace(/!\[([^\]]*)\]\(\s*([^)\s]+)(?:\s+"([^"]*)")?\s*\)/g, (m0, alt, src, title) =>
+      put('<img class="md-img" src="' + safeUrl(src) + '" alt="' + esc(alt) + '"' +
+        (title ? ' title="' + esc(title) + '"' : '') + ' loading="lazy">'));
+
+    // 5) 行内链接 [text](href "title")
+    s = s.replace(/\[([^\]]*)\]\(\s*([^)\s]+)(?:\s+"([^"]*)")?\s*\)/g, (m0, label, href, title) =>
+      put('<a class="md-link" href="' + safeUrl(href) + '" target="_blank" rel="noopener noreferrer"' +
+        (title ? ' title="' + esc(title) + '"' : '') + '>' + inline(label, ctx) + '</a>'));
+
+    // 6) 引用式链接 [text][id] / [text][] / [id]
+    if (ctx && ctx.refs) {
+      s = s.replace(/\[([^\]]*)\]\[([^\]]*)\]/g, (m0, label, id) => {
+        const key = (id || label).toLowerCase().replace(/\s+/g, ' ');
+        const r = ctx.refs[key];
+        if (!r) return m0;
+        return put('<a class="md-link" href="' + safeUrl(r.url) + '" target="_blank" rel="noopener noreferrer"' +
+          (r.title ? ' title="' + esc(r.title) + '"' : '') + '>' + inline(label || id, ctx) + '</a>');
+      });
+      s = s.replace(/\[([^\]\n]+)\]/g, (m0, label) => {
+        const r = ctx.refs[label.toLowerCase().replace(/\s+/g, ' ')];
+        if (!r) return m0;
+        return put('<a class="md-link" href="' + safeUrl(r.url) + '" target="_blank" rel="noopener noreferrer"' +
+          (r.title ? ' title="' + esc(r.title) + '"' : '') + '>' + inline(label, ctx) + '</a>');
+      });
+    }
+
+    // 7) 到这里才做 HTML 转义，剩余文本里不可能再有真实标签
+    s = esc(s);
+
+    // 8) 强调符（在已转义文本上做，不会碰到占位符）
+    s = s.replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/__(?=\S)([\s\S]*?\S)__/g, '<strong>$1</strong>');
+    s = s.replace(/~~(?=\S)([\s\S]*?\S)~~/g, '<del>$1</del>');
+    s = s.replace(/(^|[^\w*])\*(?=\S)([\s\S]*?\S)\*(?!\*)/g, '$1<em>$2</em>');
+    s = s.replace(/(^|[^\w_])_(?=\S)([\s\S]*?\S)_(?!_)/g, '$1<em>$2</em>');
+
+    // 9) 行尾两个及以上空格 → 硬换行
+    s = s.replace(/ {2,}\n/g, '<br>\n');
+
+    // 10) 还原占位符
+    return s.replace(/\u0000(\d+)\u0000/g, (m0, k) => slots[+k]);
+  }
+
+  /* -------------------------------------------------------------- 块级解析 */
+
+  const LIST_RE = /^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+|$)([\s\S]*)$/;
+  const HR_RE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+  const FENCE_RE = /^ {0,3}(`{3,}|~{3,})[ \t]*([^`\s]*)[ \t]*$/;
+  const ATX_RE = /^ {0,3}(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$/;
+  const ATX_TIGHT_RE = /^ {0,3}(#{1,6})([^#\s][\s\S]*?)[ \t]*#*[ \t]*$/;
+
+  function expandIndent(s) {
+    let n = 0;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === ' ') n++;
+      else if (s[i] === '\t') n += 4 - (n % 4);
+      else break;
+    }
+    return n;
+  }
+
+  /** 去掉一组行共有的最小缩进（用于把列表项内容还原成独立块） */
+  function dedent(items) {
+    let min = Infinity;
+    for (const it of items) {
+      if (!it.t.trim()) continue;
+      const ind = expandIndent(it.t.match(/^[ \t]*/)[0]);
+      if (ind < min) min = ind;
+    }
+    if (!isFinite(min) || min <= 0) return items;
+    return items.map((it) => {
+      let cut = 0, k = 0;
+      while (k < it.t.length && cut < min) {
+        if (it.t[k] === ' ') { cut++; k++; }
+        else if (it.t[k] === '\t') { cut += 4 - (cut % 4); k++; }
+        else break;
+      }
+      return { t: it.t.slice(k), ln: it.ln };
+    });
+  }
+
+  function isTableSep(line) {
+    if (line.indexOf('-') < 0) return false;
+    const t = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+    const cells = t.split('|');
+    if (!cells.length) return false;
+    return cells.every((c) => /^[ \t]*:?-+:?[ \t]*$/.test(c));
+  }
+
+  function splitRow(line) {
+    let s = line.trim();
+    if (s.charAt(0) === '|') s = s.slice(1);
+    if (s.charAt(s.length - 1) === '|' && s.charAt(s.length - 2) !== '\\') s = s.slice(0, -1);
+    const cells = [];
+    let buf = '';
+    let inCode = false;      // 单元格内的 `a|b` 不能把表格切开
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === '\\' && s[i + 1] === '|') { buf += '|'; i++; continue; }
+      if (c === '`') { inCode = !inCode; buf += c; continue; }
+      if (c === '|' && !inCode) { cells.push(buf); buf = ''; continue; }
+      buf += c;
+    }
+    cells.push(buf);
+    return cells.map((c) => c.trim());
+  }
+
+  function parseTable(items, start, ctx) {
+    const header = splitRow(items[start].t);
+    const align = splitRow(items[start + 1].t).map((c) => {
+      const l = c.charAt(0) === ':', r = c.charAt(c.length - 1) === ':';
+      if (l && r) return 'center';
+      if (r) return 'right';
+      if (l) return 'left';
+      return '';
+    });
+    let i = start + 2;
+    const rows = [];
+    while (i < items.length && items[i].t.trim() && items[i].t.indexOf('|') >= 0) {
+      rows.push(items[i]);
+      i++;
+    }
+    const cell = (txt, k, tag) => {
+      const a = align[k] ? ' style="text-align:' + align[k] + '"' : '';
+      return '<' + tag + a + '>' + inline(txt, ctx) + '</' + tag + '>';
+    };
+    let html = '<div class="md-table-wrap" data-line="' + items[start].ln + '">' +
+      '<table class="md-table"><thead><tr>';
+    for (let k = 0; k < header.length; k++) html += cell(header[k], k, 'th');
+    html += '</tr></thead><tbody>';
+    for (const r of rows) {
+      const cells = splitRow(r.t);
+      html += '<tr>';
+      for (let k = 0; k < header.length; k++) {
+        html += cell(cells[k] === undefined ? '' : cells[k], k, 'td');
+      }
+      html += '</tr>';
+    }
+    html += '</tbody></table></div>';
+    return { html, next: i };
+  }
+
+  function parseList(items, start, ctx) {
+    const first = LIST_RE.exec(items[start].t);
+    const baseIndent = expandIndent(first[1]);
+    const ordered = /\d/.test(first[2]);
+    const startNum = ordered ? parseInt(first[2], 10) : 1;
+    const list = [];
+    let loose = false;      // 列表项之间是否有空行 → 决定 <p> 包不包
+    let i = start;
+    const n = items.length;
+
+    while (i < n) {
+      const it = items[i];
+      if (!it.t.trim()) {
+        // 空行：向后看，下一个非空行若仍是「同类型、同级或更深」的列表项，
+        // 则列表继续（loose list）；否则列表结束。
+        let j = i + 1;
+        while (j < n && !items[j].t.trim()) j++;
+        if (j < n) {
+          const nm = LIST_RE.exec(items[j].t);
+          if (nm && expandIndent(nm[1]) >= baseIndent && (/\d/.test(nm[2]) === ordered)) {
+            loose = true;
+            i = j;
+            continue;
+          }
+        }
+        break;
+      }
+      const m = LIST_RE.exec(it.t);
+      if (m) {
+        const ind = expandIndent(m[1]);
+        if (ind < baseIndent) break;
+        // 同级的另一种列表（有序 ↔ 无序）是**新列表**，不能并进来
+        if (ind === baseIndent && /\d/.test(m[2]) !== ordered) break;
+        if (ind > baseIndent) {
+          if (!list.length) break;
+          list[list.length - 1].items.push({ t: it.t, ln: it.ln });
+          i++;
+          continue;
+        }
+        const rest = m[4];
+        const task = /^\[([ xX])\][ \t]+([\s\S]*)$/.exec(rest);
+        list.push({
+          ln: it.ln,
+          task: task ? task[1].toLowerCase() === 'x' : null,
+          items: [{ t: task ? task[2] : rest, ln: it.ln }]
+        });
+        i++;
+        continue;
+      }
+      // 非列表行：缩进比列表标记深 → 属于当前项的内容
+      const ind = expandIndent(it.t.match(/^[ \t]*/)[0]);
+      if (ind > baseIndent && list.length) {
+        list[list.length - 1].items.push({ t: it.t, ln: it.ln });
+        i++;
+        continue;
+      }
+      break;
+    }
+
+    const tag = ordered ? 'ol' : 'ul';
+    const startAttr = ordered && startNum !== 1 ? ' start="' + startNum + '"' : '';
+    const hasTask = list.some((li) => li.task !== null);
+    let html = '<' + tag + startAttr + (hasTask ? ' class="md-task-list"' : '') +
+      ' data-line="' + items[start].ln + '">';
+    for (const li of list) {
+      let inner = blocks(dedent(li.items), ctx);
+      // 紧凑列表（项之间无空行）按 CommonMark 不包 <p>，否则行距会散开
+      if (!loose) inner = inner.replace(/^<p[^>]*>([\s\S]*?)<\/p>/, '$1');
+      if (li.task !== null) {
+        const box = '<input type="checkbox" disabled' + (li.task ? ' checked' : '') + '> ';
+        if (/^<p[\s>]/.test(inner)) inner = inner.replace(/^<p([^>]*)>/, '<p$1>' + box);
+        else inner = box + inner;
+      }
+      html += '<li data-line="' + li.ln + '">' + inner + '</li>';
+    }
+    html += '</' + tag + '>';
+    return { html, next: i };
+  }
+
+  function blocks(items, ctx) {
+    const out = [];
+    let i = 0;
+    const n = items.length;
+
+    while (i < n) {
+      const it = items[i];
+      const raw = it.t;
+      if (!raw.trim()) { i++; continue; }
+      const ln = it.ln;
+
+      // 引用式链接定义：只登记，不产出内容
+      if (RE_REF_DEF.test(raw)) { i++; continue; }
+
+      // 1) 围栏代码块
+      let m = FENCE_RE.exec(raw);
+      if (m) {
+        const fence = m[1];
+        const lang = m[2] || '';
+        const buf = [];
+        const closeRe = new RegExp('^ {0,3}' + (fence[0] === '`' ? '`' : '~') + '{' + fence.length + ',}[ \\t]*$');
+        i++;
+        while (i < n) {
+          if (closeRe.test(items[i].t)) { i++; break; }
+          buf.push(items[i].t);
+          i++;
+        }
+        out.push('<pre class="md-code" data-line="' + ln + '"><code' +
+          (lang ? ' class="language-' + esc(lang) + '"' : '') + '>' +
+          esc(buf.join('\n')) + '</code></pre>');
+        continue;
+      }
+
+      // 2) 分隔线（出现在块起始位置时才是 hr；段落后的 --- 走 setext 标题）
+      if (HR_RE.test(raw)) {
+        out.push('<hr data-line="' + ln + '">');
+        i++;
+        continue;
+      }
+
+      // 3) ATX 标题
+      m = ATX_RE.exec(raw) || ATX_TIGHT_RE.exec(raw);
+      if (m) {
+        const lv = m[1].length;
+        out.push('<h' + lv + ' data-line="' + ln + '">' + inline(m[2], ctx) + '</h' + lv + '>');
+        i++;
+        continue;
+      }
+
+      // 4) 引用块（可嵌套）
+      if (/^ {0,3}>/.test(raw)) {
+        const buf = [];
+        while (i < n) {
+          const t = items[i].t;
+          if (/^ {0,3}>/.test(t)) {
+            buf.push({ t: t.replace(/^ {0,3}>[ \t]?/, ''), ln: items[i].ln });
+            i++;
+            continue;
+          }
+          // 惰性续行：引用内紧跟的非空行且不是新块起始
+          if (t.trim() && buf.length && !/^ {0,3}(#{1,6}[ \t]|`{3,}|~{3,}|>)/.test(t) &&
+              !LIST_RE.test(t) && !HR_RE.test(t)) {
+            buf.push({ t: t, ln: items[i].ln });
+            i++;
+            continue;
+          }
+          break;
+        }
+        out.push('<blockquote data-line="' + ln + '">' + blocks(buf, ctx) + '</blockquote>');
+        continue;
+      }
+
+      // 5) 列表
+      if (LIST_RE.test(raw)) {
+        const r = parseList(items, i, ctx);
+        out.push(r.html);
+        i = r.next;
+        continue;
+      }
+
+      // 6) 表格
+      if (raw.indexOf('|') >= 0 && i + 1 < n && isTableSep(items[i + 1].t)) {
+        const r = parseTable(items, i, ctx);
+        out.push(r.html);
+        i = r.next;
+        continue;
+      }
+
+      // 7) 段落 / Setext 标题
+      const buf = [{ t: raw, ln: ln }];
+      i++;
+      let setext = 0;
+      while (i < n) {
+        const t = items[i].t;
+        if (!t.trim()) break;
+        if (/^ {0,3}=+[ \t]*$/.test(t)) { setext = 1; i++; break; }
+        if (/^ {0,3}-+[ \t]*$/.test(t)) { setext = 2; i++; break; }
+        if (/^ {0,3}(#{1,6}[ \t]|`{3,}|~{3,}|>)/.test(t)) break;
+        if (LIST_RE.test(t) || HR_RE.test(t) || RE_REF_DEF.test(t)) break;
+        if (t.indexOf('|') >= 0 && i + 1 < n && isTableSep(items[i + 1].t)) break;
+        buf.push({ t: t, ln: items[i].ln });
+        i++;
+      }
+      const body = buf.map((b) => b.t).join('\n');
+      if (setext) {
+        const lv = setext === 1 ? 1 : 2;
+        out.push('<h' + lv + ' data-line="' + ln + '">' + inline(body.replace(/\n/g, ' '), ctx) + '</h' + lv + '>');
+      } else {
+        out.push('<p data-line="' + ln + '">' + inline(body, ctx) + '</p>');
+      }
+    }
+
+    return out.join('\n');
+  }
+
+  /* ------------------------------------------------------------------ 入口 */
+
+  /**
+   * 把 Markdown 源码渲染为 HTML 片段。
+   * 每个块级元素都带 data-line="源码行号(0 基)"，供阅读模式做滚动同步。
+   */
+  function render(src, opts) {
+    opts = opts || {};
+    const text = String(src == null ? '' : src).replace(/\r\n?/g, '\n');
+    if (!text.trim()) return '<p class="md-empty">（空文档）</p>';
+    const items = text.split('\n').map((t, k) => ({ t, ln: k }));
+    const ctx = { opts: opts, refs: collectRefs(items) };
+    return blocks(items, ctx);
+  }
+
+  NT.markdown = {
+    render,
+    renderInline: (s) => inline(s, { refs: Object.create(null) }),
+    escapeHtml: esc,
+    safeUrl,
+    isMarkdown
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
 /* ==== src/50-completion.js ==== */
 /* ============================================================================
  * 50-completion.js — 自动补全
@@ -4709,6 +5177,8 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       this._buildUi();
       this.view = new NT.EditorView(document.getElementById('editorHost'), this);
       this.view.ac = new NT.CompletionController(this.view);
+      // Markdown 阅读面板依赖 this.view（滚动同步要用它），所以必须在其后创建
+      if (NT.MarkdownPreview) this.preview = new NT.MarkdownPreview(this);
       this.plugins = new NT.PluginHost(this);
       this.macros = new NT.MacroEngine(this);
 
@@ -4795,7 +5265,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         wordWrap: false, showLineNumbers: true, highlightCurrentLine: true,
         fontSize: 13, theme: 'light', macroDelay: 30, autoComplete: true,
         lightweightLines: 120000, lightweightBytes: 4 * 1024 * 1024,
-        showSidebar: true
+        showSidebar: true, mdPreviewWidth: 0
       };
       try {
         const raw = localStorage.getItem(LS_KEY);
@@ -4885,6 +5355,14 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         ],
         view: [
           mi('view', '显示侧边栏', 'view.toggleSidebar', { checked: () => this.settings.showSidebar }),
+          { sep: true },
+          mi('view', 'Markdown 分栏预览', 'md.toggleSplit', {
+            checked: () => this.preview && this.preview.mode === 'split'
+          }),
+          mi('view', 'Markdown 阅读模式', 'md.toggleRead', {
+            checked: () => this.preview && this.preview.mode === 'read'
+          }),
+          mi('view', '导出为 HTML…', 'md.exportHtml'),
           { sep: true },
           mi('view', '放大字号', 'view.zoomIn'), mi('view', '缩小字号', 'view.zoomOut'),
           mi('view', '重置字号', 'view.zoomReset'),
@@ -5041,6 +5519,8 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         btn('折叠', 'view.foldAll', '折叠全部 (Alt+0)') +
         btn('展开', 'view.unfoldAll', '展开全部 (Alt+Shift+0)') +
         '<span class="tsep"></span>' +
+        '<button class="tbtn" id="btnMdPreview" title="Markdown 分栏预览 (Ctrl+Shift+V)">预览</button>' +
+        '<span class="tsep"></span>' +
         '<button class="tbtn" id="btnRecord" title="录制宏 (Ctrl+Shift+R)">● 录制</button>' +
         '<button class="tbtn" id="btnPlay" title="回放宏 (Ctrl+Alt+P)">▶ 回放</button>' +
         '<span class="tsep"></span>' +
@@ -5057,6 +5537,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       });
       tb.querySelector('#btnRecord').addEventListener('click', () => this.exec('macro.record.toggle'));
       tb.querySelector('#btnPlay').addEventListener('click', () => this.exec('macro.playLast'));
+      tb.querySelector('#btnMdPreview').addEventListener('click', () => this.exec('md.toggleSplit'));
       tb.querySelector('#selLang').addEventListener('change', (e) => this.exec('lang.set', { id: e.target.value }));
       tb.querySelector('#selTheme').addEventListener('change', (e) => {
         this.settings.theme = e.target.value; this.saveSettings(); this._applySettings();
@@ -5181,6 +5662,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       this.activeTab = tab;
       this.view.setDocument(tab.doc, { scrollTop: tab.scrollTop });
       this.view.ac.hide();
+      if (this.preview) this.preview.onTabChange(tab);
       this.renderTabs();
       this.refreshAll();
       NT.bus.emit('doc:open', { doc: tab.doc, tab });
@@ -5224,12 +5706,14 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         '<div class="sb" id="sbSel"></div>' +
         '<div class="sb" id="sbLen"></div>' +
         '<div class="sb sb-right" id="sbPlugins"></div>' +
+        '<div class="sb clickable" id="sbMd" hidden title="点击切换 Markdown 阅读模式">编辑</div>' +
         '<div class="sb clickable" id="sbMode" title="点击切换轻量模式">完整模式</div>' +
         '<div class="sb" id="sbEol">LF</div>' +
         '<div class="sb">UTF-8</div>' +
         '<div class="sb clickable" id="sbLang">纯文本</div>';
       sb.querySelector('#sbLang').addEventListener('click', () => this._openMenu(this.el.menubar.querySelector('[data-menu="lang"]')));
       sb.querySelector('#sbMode').addEventListener('click', () => this.exec('view.toggleLightweight'));
+      sb.querySelector('#sbMd').addEventListener('click', () => this.exec('md.cycleMode'));
       this._sbPlugins = sb.querySelector('#sbPlugins');
       this._pluginStatusHost = document.createElement('div');
     }
@@ -5256,6 +5740,17 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       sb.querySelector('#sbEol').textContent = doc.eol === '\r\n' ? 'CRLF' : doc.eol === '\r' ? 'CR' : 'LF';
       sb.querySelector('#sbLang').textContent = NT.languages.get(doc.language).name;
       sb.querySelector('#sbMode').textContent = this.view.lightweight ? '轻量模式' : '完整模式';
+
+      // Markdown 模式指示：只在 Markdown 文档上出现，点击循环 编辑 → 分栏 → 阅读
+      const mdEl = sb.querySelector('#sbMd');
+      if (mdEl) {
+        const isMd = NT.markdown && NT.markdown.isMarkdown(doc);
+        mdEl.hidden = !isMd;
+        if (isMd && this.preview) mdEl.textContent = 'MD · ' + this.preview.modeLabel();
+      }
+
+      // 内容变了让预览跟上（防抖在 MarkdownPreview 内部）
+      if (this.preview) this.preview.scheduleRefresh();
 
       const sel = this.el.toolbar.querySelector('#selLang');
       if (sel && sel.value !== doc.language) sel.value = doc.language;
@@ -5967,7 +6462,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
           const d = doc(); if (!d) return;
           const text = d.hasSel() ? d.selText() : d.lineAt(d.positionAt(d.sel.head).line) + '\n';
           try { await navigator.clipboard.writeText(text); this.toast('已复制', 'ok'); } catch (e) {
-            this.toast('复制失败（浏览器未授权剪贴板）', 'err');
+            this.toast('复制失败（剪贴板被占用或系统权限受限）', 'err');
           }
         } });
 
@@ -5976,7 +6471,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
           try {
             const text = await navigator.clipboard.readText();
             view().insertText(text.replace(/\r\n?/g, '\n'));
-          } catch (e) { this.toast('粘贴失败：请使用 Ctrl+V 或授权剪贴板权限', 'err'); }
+          } catch (e) { this.toast('粘贴失败：剪贴板为空或无法访问', 'err'); }
         } });
 
       C({ id: 'edit.insertText', title: '插入文本', hidden: true,
@@ -6209,6 +6704,65 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
           this.toast('已' + (view().lightweight ? '开启' : '关闭') + '轻量模式（关闭语法高亮与折叠以提升大文件流畅度）', 'ok');
         } });
 
+      /* ------------------------------------------------------ Markdown */
+      const mdOn = () => !!(this.preview && NT.markdown && NT.markdown.isMarkdown(doc()));
+
+      C({ id: 'md.toggleSplit', title: 'Markdown 分栏预览', keybinding: 'Ctrl+Shift+V', category: 'Markdown',
+        enabled: mdOn,
+        run: () => this.preview.toggle('split') });
+
+      C({ id: 'md.toggleRead', title: 'Markdown 阅读模式', keybinding: 'Ctrl+Shift+M', category: 'Markdown',
+        enabled: mdOn,
+        run: () => this.preview.toggle('read') });
+
+      C({ id: 'md.cycleMode', title: '循环切换 Markdown 视图', category: 'Markdown',
+        enabled: mdOn,
+        run: () => {
+          const order = ['edit', 'split', 'read'];
+          const cur = this.preview.mode;
+          this.preview.setMode(order[(order.indexOf(cur) + 1) % order.length]);
+        } });
+
+      C({ id: 'md.exportHtml', title: '导出为 HTML…', category: 'Markdown',
+        enabled: mdOn,
+        run: () => this.preview.exportHtml() });
+
+      /* 行内格式化：包裹选区（无选区时插入一对标记并把光标放中间） */
+      const wrap = (left, right, placeholder) => () => {
+        const d = doc();
+        if (!d) return;
+        const sel = d.selRange();
+        const text = sel.end > sel.start ? d.getRange(sel.start, sel.end) : (placeholder || '');
+        d.replaceRange(sel.start, sel.end, left + text + right, {
+          undo: 'type',
+          sel: { anchor: sel.start + left.length, head: sel.start + left.length + text.length }
+        });
+        view()._afterExternalEdit();
+      };
+
+      C({ id: 'md.bold', title: '加粗', keybinding: 'Ctrl+B', category: 'Markdown',
+        enabled: mdOn, run: wrap('**', '**', '粗体') });
+      C({ id: 'md.italic', title: '斜体', keybinding: 'Ctrl+I', category: 'Markdown',
+        enabled: mdOn, run: wrap('*', '*', '斜体') });
+      C({ id: 'md.strike', title: '删除线', keybinding: 'Ctrl+Shift+X', category: 'Markdown',
+        enabled: mdOn, run: wrap('~~', '~~', '删除线') });
+      C({ id: 'md.code', title: '行内代码', keybinding: 'Ctrl+`', category: 'Markdown',
+        enabled: mdOn, run: wrap('`', '`', 'code') });
+      C({ id: 'md.link', title: '插入链接', keybinding: 'Ctrl+K', category: 'Markdown',
+        enabled: mdOn,
+        run: () => {
+          const d = doc();
+          if (!d) return;
+          const sel = d.selRange();
+          const text = sel.end > sel.start ? d.getRange(sel.start, sel.end) : '链接文字';
+          const insert = '[' + text + '](https://)';
+          d.replaceRange(sel.start, sel.end, insert, {
+            undo: 'type',
+            sel: { anchor: sel.start + insert.length - 1, head: sel.start + insert.length - 1 }
+          });
+          view()._afterExternalEdit();
+        } });
+
       /* ---------------------------------------------------------- 语言 */
       C({ id: 'lang.set', title: '设置语言', hidden: true,
         run: (a) => {
@@ -6368,6 +6922,589 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
   NT.App = App;
 
   if (typeof module !== 'undefined' && module.exports) module.exports = NT;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* ==== src/96-markdown-preview.js ==== */
+/* ============================================================================
+ * 96-markdown-preview.js — Markdown 阅读模式（分栏 / 纯阅读 / 导出 HTML）
+ *
+ * 设计取舍：
+ *   · 面板 DOM 全部由 JS 创建并插入 .main，不要求 index.html 预留节点。
+ *     好处是 test/browser.test.html 这种"自带 DOM 的测试页"也能直接用，
+ *     不必维护两份 HTML 结构。
+ *   · 样式以 <style> 注入（而不是写进 styles.css），因为导出 HTML 时要
+ *     把这份样式原样内联进产物 —— 一份来源，两处使用，不会漂移。
+ *   · 滚动同步靠渲染器输出的 data-line：编辑区顶行 → 最近的源码行锚点 →
+ *     预览区对应元素的 offsetTop。比按比例换算准得多（代码块、图片高度
+ *     差异很大，比例法会越滚越偏）。
+ *
+ * 三种模式：
+ *   edit  只看源码（默认；非 Markdown 文件强制此模式）
+ *   split 左源码右预览，中间分隔条可拖
+ *   read  只看渲染结果（编辑器隐藏）
+ * ========================================================================== */
+(function (global) {
+  'use strict';
+
+  const NT = global.NT;
+  if (!NT) return;
+  const U = NT.util;
+
+  const MIN_PANE = 260;      // 预览面板最小宽度
+  const MIN_EDITOR = 320;    // 分栏时编辑区最小宽度
+
+  /* ------------------------------------------------------------------ 样式 */
+  const CSS = `
+.md-preview {
+  display: none;
+  flex-direction: column;
+  min-width: ${MIN_PANE}px;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  overflow: hidden;
+}
+.main[data-md-mode="split"] .md-preview,
+.main[data-md-mode="read"] .md-preview { display: flex; }
+.main[data-md-mode="split"] .md-preview { flex: 0 0 50%; }
+.main[data-md-mode="read"] .md-preview { flex: 1 1 auto; border-left: none; }
+.main[data-md-mode="read"] .editor-host { display: none; }
+.main[data-md-mode="read"] .md-splitter { display: none; }
+
+.md-splitter {
+  display: none;
+  flex: 0 0 5px;
+  cursor: col-resize;
+  position: relative;
+  background: transparent;
+}
+.main[data-md-mode="split"] .md-splitter { display: block; }
+.md-splitter:hover::after,
+.md-splitter.dragging::after {
+  content: '';
+  position: absolute;
+  inset: 0 2px;
+  background: var(--accent);
+  opacity: .35;
+}
+
+.md-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  font-size: 12px;
+  color: var(--fg-dim);
+  user-select: none;
+}
+.md-seg { display: flex; gap: 2px; }
+.md-seg button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  padding: 2px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+  line-height: 1.5;
+}
+.md-seg button:hover { background: var(--bg-alt); color: var(--fg); }
+.md-seg button.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.md-preview-stat { color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.md-preview-bar .spacer { flex: 1; }
+.md-preview-bar .md-export {
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elev);
+  color: var(--fg-dim);
+  font: inherit;
+  padding: 2px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.md-preview-bar .md-export:hover { color: var(--accent); border-color: var(--accent); }
+
+.md-preview-body {
+  flex: 1;
+  overflow: auto;
+  padding: 22px 30px 70px;
+  font: 15px/1.75 var(--nt-font-ui);
+  color: var(--fg);
+  overflow-wrap: break-word;
+  scroll-behavior: auto;
+}
+.md-preview-body > :first-child { margin-top: 0; }
+.md-preview-body h1,
+.md-preview-body h2,
+.md-preview-body h3,
+.md-preview-body h4,
+.md-preview-body h5,
+.md-preview-body h6 { line-height: 1.35; margin: 1.6em 0 .6em; font-weight: 600; }
+.md-preview-body h1 { font-size: 1.85em; padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+.md-preview-body h2 { font-size: 1.42em; padding-bottom: .25em; border-bottom: 1px solid var(--border); }
+.md-preview-body h3 { font-size: 1.2em; }
+.md-preview-body h4 { font-size: 1.06em; }
+.md-preview-body h5,
+.md-preview-body h6 { font-size: 1em; color: var(--fg-dim); }
+.md-preview-body p { margin: .85em 0; }
+.md-preview-body a.md-link { color: var(--accent); text-decoration: none; }
+.md-preview-body a.md-link:hover { text-decoration: underline; }
+.md-preview-body strong { font-weight: 600; }
+.md-preview-body del { color: var(--fg-dim); }
+.md-preview-body code.md-code-inline {
+  font-family: var(--nt-font);
+  font-size: .88em;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: .1em .38em;
+}
+.md-preview-body pre.md-code {
+  margin: 1em 0;
+  padding: 12px 14px;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: auto;
+}
+.md-preview-body pre.md-code code {
+  display: block;
+  font-family: var(--nt-font);
+  font-size: 12.5px;
+  line-height: 1.62;
+  white-space: pre;
+  tab-size: 4;
+}
+.md-preview-body blockquote {
+  margin: 1em 0;
+  padding: .1em 0 .1em 1em;
+  border-left: 3px solid var(--border-strong);
+  color: var(--fg-dim);
+}
+.md-preview-body blockquote > :first-child { margin-top: 0; }
+.md-preview-body blockquote > :last-child { margin-bottom: 0; }
+.md-preview-body ul,
+.md-preview-body ol { margin: .75em 0; padding-left: 1.9em; }
+.md-preview-body li { margin: .3em 0; }
+.md-preview-body li > p { margin: .2em 0; }
+.md-preview-body ul.md-task-list { list-style: none; padding-left: 1.1em; }
+.md-preview-body ul.md-task-list > li { display: flex; align-items: baseline; gap: .5em; }
+.md-preview-body ul.md-task-list input[type=checkbox] { margin: 0; flex: none; }
+.md-preview-body .md-table-wrap { overflow-x: auto; margin: 1em 0; }
+.md-preview-body table.md-table { border-collapse: collapse; font-size: .93em; }
+.md-preview-body table.md-table th,
+.md-preview-body table.md-table td {
+  border: 1px solid var(--border);
+  padding: 6px 13px;
+}
+.md-preview-body table.md-table th { background: var(--bg-alt); font-weight: 600; }
+.md-preview-body hr { border: none; border-top: 1px solid var(--border); margin: 2.2em 0; }
+.md-preview-body img.md-img { max-width: 100%; border-radius: 4px; }
+.md-preview-body .md-empty { color: var(--fg-faint); }
+
+/* 导出的独立 HTML 复用同一套规则 */
+body.md-export { margin: 0; background: var(--bg); color: var(--fg); }
+body.md-export .md-preview-body {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 44px 28px 90px;
+  overflow: visible;
+}
+
+@media print {
+  .md-preview-bar, .md-splitter { display: none !important; }
+  .md-preview-body { padding: 0 !important; }
+}
+`;
+
+  /* ------------------------------------------------------------- 主类 */
+
+  class MarkdownPreview {
+    constructor(app) {
+      this.app = app;
+      this.mode = 'edit';
+      this._timer = 0;
+      this._renderedVersion = -1;
+      this._anchors = [];
+      this._syncing = false;
+      this._rafPending = false;
+      this._dragWidth = 0;
+      this._styleEl = null;
+      this._injectStyle();
+      this._build();
+      if (this.pane) this._bind();
+    }
+
+    /* ------------------------------------------------------------ 构建 */
+
+    _injectStyle() {
+      if (document.getElementById('mdPreviewStyle')) {
+        this._styleEl = document.getElementById('mdPreviewStyle');
+        return;
+      }
+      const st = document.createElement('style');
+      st.id = 'mdPreviewStyle';
+      st.textContent = CSS;
+      document.head.appendChild(st);
+      this._styleEl = st;
+    }
+
+    _build() {
+      const main = document.querySelector('.main');
+      if (!main) return;
+      this.main = main;
+
+      const splitter = document.createElement('div');
+      splitter.className = 'md-splitter';
+      splitter.title = '拖动调整预览宽度';
+
+      const pane = document.createElement('div');
+      pane.className = 'md-preview';
+      pane.innerHTML =
+        '<div class="md-preview-bar">' +
+          '<div class="md-seg">' +
+            '<button type="button" data-mode="edit" title="只看源码">编辑</button>' +
+            '<button type="button" data-mode="split" title="源码 + 预览 (Ctrl+Shift+V)">分栏</button>' +
+            '<button type="button" data-mode="read" title="只看预览 (Ctrl+Shift+M)">阅读</button>' +
+          '</div>' +
+          '<span class="md-preview-stat"></span>' +
+          '<span class="spacer"></span>' +
+          '<button type="button" class="md-export" title="导出为可独立打开的 HTML 文件">导出 HTML</button>' +
+        '</div>' +
+        '<div class="md-preview-body"></div>';
+
+      // 顺序：编辑器 → 分隔条 → 预览 → 侧边栏
+      const sidebar = main.querySelector('.sidebar');
+      if (sidebar) {
+        main.insertBefore(splitter, sidebar);
+        main.insertBefore(pane, sidebar);
+      } else {
+        main.appendChild(splitter);
+        main.appendChild(pane);
+      }
+
+      this.splitter = splitter;
+      this.pane = pane;
+      this.body = pane.querySelector('.md-preview-body');
+      this.stat = pane.querySelector('.md-preview-stat');
+      this.segButtons = Array.prototype.slice.call(pane.querySelectorAll('.md-seg button'));
+    }
+
+    _bind() {
+      for (const b of this.segButtons) {
+        b.addEventListener('click', () => this.setMode(b.dataset.mode));
+      }
+      this.pane.querySelector('.md-export').addEventListener('click', () => this.exportHtml());
+      this.splitter.addEventListener('pointerdown', (e) => this._onSplitterDown(e));
+
+      const view = this.app.view;
+      if (view && view.input) {
+        view.input.addEventListener('scroll', () => this._onEditorScroll(), { passive: true });
+      }
+      this.body.addEventListener('scroll', () => this._onPreviewScroll(), { passive: true });
+
+      // 点击预览里的锚点链接时，交给系统浏览器/外壳打开，不在应用内跳走
+      this.body.addEventListener('click', (e) => {
+        const a = e.target.closest('a.md-link');
+        if (!a) return;
+        const href = a.getAttribute('href') || '';
+        if (!href || href.charAt(0) === '#') return;
+        e.preventDefault();
+        const d = global.notepadDesktop;
+        if (d && d.openExternal) d.openExternal(href);
+        else global.open(href, '_blank', 'noopener');
+      });
+    }
+
+    /* ------------------------------------------------------------ 模式 */
+
+    isMarkdown(doc) { return NT.markdown.isMarkdown(doc || this.app.activeDoc); }
+
+    setMode(mode, opt) {
+      opt = opt || {};
+      if (!this.pane) return;
+      if (mode !== 'edit' && !this.isMarkdown()) {
+        if (!opt.silent) this.app.toast('当前文件不是 Markdown，无法进入阅读模式', 'warn');
+        mode = 'edit';
+      }
+      this.mode = mode;
+      const tab = this.app.activeTab;
+      if (tab) tab.mdMode = mode;
+      this.applyMode();
+      this.refresh(true);
+      if (mode !== 'edit' && !opt.silent) this.app.refreshStatus();
+    }
+
+    /** 同一个目标模式再点一次 = 回到编辑 */
+    toggle(mode) {
+      this.setMode(this.mode === mode ? 'edit' : mode);
+    }
+
+    applyMode() {
+      if (!this.main) return;
+      this.main.dataset.mdMode = this.mode;
+      for (const b of this.segButtons) {
+        b.classList.toggle('active', b.dataset.mode === this.mode);
+      }
+      const w = this.app.settings && this.app.settings.mdPreviewWidth;
+      if (w) this.pane.style.flexBasis = w + 'px';
+      // 阅读模式下编辑器不可见，重新渲染一次拿到正确的尺寸
+      if (this.mode === 'read' && this.app.view) this.app.view.render(true);
+    }
+
+    /** 切换标签页时同步模式（每个标签页各自记住自己的阅读状态） */
+    onTabChange(tab) {
+      if (!this.pane) return;
+      let mode = tab && tab.mdMode;
+      if (!mode) mode = this.isMarkdown(tab && tab.doc) ? 'edit' : 'edit';
+      if (mode !== 'edit' && !this.isMarkdown(tab && tab.doc)) mode = 'edit';
+      this.mode = mode;
+      this.applyMode();
+      this.refresh(true);
+    }
+
+    /* ------------------------------------------------------------ 渲染 */
+
+    scheduleRefresh(delay) {
+      if (this.mode === 'edit') return;
+      clearTimeout(this._timer);
+      this._timer = setTimeout(() => this.refresh(false), delay === undefined ? 140 : delay);
+    }
+
+    refresh(force) {
+      if (!this.body) return;
+      const doc = this.app.activeDoc;
+      const md = this.isMarkdown(doc);
+
+      if (this.mode === 'edit' || !md || !doc) {
+        if (this.body.firstChild) this.body.innerHTML = '';
+        this._anchors = [];
+        this._renderedVersion = -1;
+        if (this.stat) this.stat.textContent = '';
+        return;
+      }
+      if (!force && this._renderedVersion === doc.version) return;
+
+      const text = doc.getText();
+      this.body.innerHTML = NT.markdown.render(text);
+      this._renderedVersion = doc.version;
+      this._rebuildAnchors();
+      this._updateStat(text);
+      this._syncPreviewToEditor();
+    }
+
+    _updateStat(text) {
+      if (!this.stat) return;
+      const lines = text ? text.split('\n').length : 0;
+      const chars = text.replace(/\s/g, '').length;
+      this.stat.textContent = '共 ' + lines.toLocaleString() + ' 行 · ' + chars.toLocaleString() + ' 字';
+    }
+
+    _rebuildAnchors() {
+      this._anchors = [];
+      const els = this.body.querySelectorAll('[data-line]');
+      for (let i = 0; i < els.length; i++) {
+        const ln = parseInt(els[i].getAttribute('data-line'), 10);
+        if (!isNaN(ln)) this._anchors.push({ ln: ln, el: els[i] });
+      }
+      this._anchors.sort((a, b) => a.ln - b.ln);
+    }
+
+    /** 二分：找最后一个 ln <= line 的锚点 */
+    _anchorFor(line) {
+      const arr = this._anchors;
+      if (!arr.length) return null;
+      let lo = 0, hi = arr.length - 1, best = arr[0];
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (arr[mid].ln <= line) { best = arr[mid]; lo = mid + 1; }
+        else hi = mid - 1;
+      }
+      return best;
+    }
+
+    /* -------------------------------------------------------- 滚动同步 */
+
+    _onEditorScroll() {
+      if (this.mode !== 'split' || this._syncing) return;
+      if (this._rafPending) return;
+      this._rafPending = true;
+      requestAnimationFrame(() => {
+        this._rafPending = false;
+        this._syncPreviewToEditor();
+      });
+    }
+
+    _syncPreviewToEditor() {
+      if (this.mode !== 'split') return;
+      const view = this.app.view;
+      if (!view || !view.doc) return;
+      const firstViewLine = Math.max(0, view._lastRender.first);
+      const docLine = view.docLineOf(firstViewLine);
+      const a = this._anchorFor(docLine);
+      if (!a) return;
+      const target = Math.max(0, a.el.offsetTop - 8);
+      if (Math.abs(this.body.scrollTop - target) < 2) return;
+      this._syncing = true;
+      this.body.scrollTop = target;
+      requestAnimationFrame(() => { this._syncing = false; });
+    }
+
+    _onPreviewScroll() {
+      if (this.mode !== 'split' || this._syncing) return;
+      const arr = this._anchors;
+      if (!arr.length) return;
+      const top = this.body.scrollTop + 8;
+      let lo = 0, hi = arr.length - 1, best = arr[0];
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (arr[mid].el.offsetTop <= top) { best = arr[mid]; lo = mid + 1; }
+        else hi = mid - 1;
+      }
+      const view = this.app.view;
+      if (!view || !view.doc) return;
+      const vl = view.viewLineOf(best.ln);
+      const lh = view.metrics.lh;
+      const target = Math.max(0, view.metrics.padTop + vl * lh - 8);
+      if (Math.abs(view.input.scrollTop - target) < 2) return;
+      this._syncing = true;
+      view.input.scrollTop = target;
+      view.render();
+      requestAnimationFrame(() => { this._syncing = false; });
+    }
+
+    /* -------------------------------------------------------- 分隔条拖动 */
+
+    _onSplitterDown(e) {
+      e.preventDefault();
+      const mainRect = this.main.getBoundingClientRect();
+      const startX = e.clientX;
+      const startW = this.pane.getBoundingClientRect().width;
+      this.splitter.classList.add('dragging');
+
+      const move = (ev) => {
+        const maxW = Math.max(MIN_PANE, mainRect.width - MIN_EDITOR);
+        const w = U.clamp(startW - (ev.clientX - startX), MIN_PANE, maxW);
+        this.pane.style.flexBasis = w + 'px';
+        this._dragWidth = w;
+      };
+      const up = () => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        this.splitter.classList.remove('dragging');
+        if (this._dragWidth && this.app.settings) {
+          this.app.settings.mdPreviewWidth = Math.round(this._dragWidth);
+          this.app.saveSettings();
+        }
+        this.app.view.render(true);
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+    }
+
+    /* ------------------------------------------------------------ 导出 */
+
+    async exportHtml() {
+      const doc = this.app.activeDoc;
+      if (!this.isMarkdown(doc)) {
+        this.app.toast('当前文件不是 Markdown', 'warn');
+        return false;
+      }
+      const base = String(doc.name || 'untitled').replace(/\.(md|markdown|mdx|mkd|mkdn|mdwn)$/i, '');
+      const html = this._buildExportHtml(base, doc.getText());
+      const fileName = base + '.html';
+
+      // 桌面外壳：走原生「另存为」对话框
+      const d = global.notepadDesktop;
+      if (d && d.saveFile) {
+        try {
+          const res = await d.saveFile({
+            path: null,
+            name: fileName,
+            text: html,
+            filters: [{ name: 'HTML 文档', extensions: ['html', 'htm'] }, { name: '全部文件', extensions: ['*'] }]
+          });
+          if (!res || res.canceled) return false;
+          this.app.toast('已导出 ' + res.name, 'ok');
+          return true;
+        } catch (e) {
+          this.app.toast('导出失败：' + e.message, 'err');
+          return false;
+        }
+      }
+
+      // 浏览器：优先 File System Access API，其次 Blob 下载
+      try {
+        if (global.showSaveFilePicker) {
+          const handle = await global.showSaveFilePicker({
+            suggestedName: fileName,
+            types: [{ description: 'HTML 文档', accept: { 'text/html': ['.html', '.htm'] } }]
+          });
+          const w = await handle.createWritable();
+          await w.write(html);
+          await w.close();
+          this.app.toast('已导出 ' + handle.name, 'ok');
+          return true;
+        }
+      } catch (e) {
+        if (e && e.name === 'AbortError') return false;
+      }
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fileName;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      this.app.toast('已导出 ' + fileName, 'ok');
+      return true;
+    }
+
+    _buildExportHtml(title, text) {
+      const body = NT.markdown.render(text);
+      const css = (this._styleEl ? this._styleEl.textContent : CSS) + '\n' + this._themeVarsCss();
+      return '<!DOCTYPE html>\n' +
+        '<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n' +
+        '<meta name="viewport" content="width=device-width,initial-scale=1">\n' +
+        '<title>' + NT.markdown.escapeHtml(title) + '</title>\n' +
+        '<style>\n' + css + '\n</style>\n</head>\n' +
+        '<body class="md-export">\n<article class="md-preview-body">\n' + body + '\n</article>\n</body>\n</html>\n';
+    }
+
+    /** 把当前主题的 CSS 变量取出来，导出文件才能和编辑器里看到的一致 */
+    _themeVarsCss() {
+      const names = ['--bg', '--bg-alt', '--bg-panel', '--bg-elev', '--border', '--border-strong',
+        '--fg', '--fg-dim', '--fg-faint', '--accent', '--accent-soft', '--nt-font', '--nt-font-ui'];
+      let out = ':root {\n';
+      try {
+        const cs = getComputedStyle(document.documentElement);
+        for (const n of names) {
+          const v = cs.getPropertyValue(n).trim();
+          if (v) out += '  ' + n + ': ' + v + ';\n';
+        }
+      } catch (e) { /* 无 DOM 环境下忽略 */ }
+      return out + '}\n';
+    }
+
+    /* ------------------------------------------------------------ 杂项 */
+
+    /** 供状态栏显示当前模式 */
+    modeLabel() {
+      if (!this.isMarkdown()) return '';
+      return this.mode === 'read' ? '阅读' : this.mode === 'split' ? '分栏' : '编辑';
+    }
+
+    destroy() {
+      clearTimeout(this._timer);
+      if (this.pane) this.pane.remove();
+      if (this.splitter) this.splitter.remove();
+    }
+  }
+
+  NT.MarkdownPreview = MarkdownPreview;
 })(typeof window !== 'undefined' ? window : globalThis);
 
 </script>

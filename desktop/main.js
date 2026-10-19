@@ -217,8 +217,9 @@ function createWindow() {
     if (/^https?:/i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  // 禁止一切权限请求（摄像头/麦克风/通知等），本应用只需要剪贴板
-  mainWindow.webContents.session.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
+  // 仅放行剪贴板读写权限；其余（摄像头/麦克风/通知/定位等）一律拒绝
+  const ALLOWED = new Set(['clipboard-read', 'clipboard-sanitized-write', 'clipboard-write']);
+  mainWindow.webContents.session.setPermissionRequestHandler((_wc, perm, cb) => cb(ALLOWED.has(perm)));
 
   /* ------------------------------------------------------- 快捷键：F12 */
   // 应用自身没有占用 F12，这里单独接管开发者工具，避免为此引入原生菜单

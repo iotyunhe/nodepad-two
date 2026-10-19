@@ -126,6 +126,8 @@
       this._buildUi();
       this.view = new NT.EditorView(document.getElementById('editorHost'), this);
       this.view.ac = new NT.CompletionController(this.view);
+      // Markdown 阅读面板依赖 this.view（滚动同步要用它），所以必须在其后创建
+      if (NT.MarkdownPreview) this.preview = new NT.MarkdownPreview(this);
       this.plugins = new NT.PluginHost(this);
       this.macros = new NT.MacroEngine(this);
 
@@ -212,7 +214,7 @@
         wordWrap: false, showLineNumbers: true, highlightCurrentLine: true,
         fontSize: 13, theme: 'light', macroDelay: 30, autoComplete: true,
         lightweightLines: 120000, lightweightBytes: 4 * 1024 * 1024,
-        showSidebar: true
+        showSidebar: true, mdPreviewWidth: 0
       };
       try {
         const raw = localStorage.getItem(LS_KEY);
@@ -302,6 +304,14 @@
         ],
         view: [
           mi('view', '显示侧边栏', 'view.toggleSidebar', { checked: () => this.settings.showSidebar }),
+          { sep: true },
+          mi('view', 'Markdown 分栏预览', 'md.toggleSplit', {
+            checked: () => this.preview && this.preview.mode === 'split'
+          }),
+          mi('view', 'Markdown 阅读模式', 'md.toggleRead', {
+            checked: () => this.preview && this.preview.mode === 'read'
+          }),
+          mi('view', '导出为 HTML…', 'md.exportHtml'),
           { sep: true },
           mi('view', '放大字号', 'view.zoomIn'), mi('view', '缩小字号', 'view.zoomOut'),
           mi('view', '重置字号', 'view.zoomReset'),
@@ -458,6 +468,8 @@
         btn('折叠', 'view.foldAll', '折叠全部 (Alt+0)') +
         btn('展开', 'view.unfoldAll', '展开全部 (Alt+Shift+0)') +
         '<span class="tsep"></span>' +
+        '<button class="tbtn" id="btnMdPreview" title="Markdown 分栏预览 (Ctrl+Shift+V)">预览</button>' +
+        '<span class="tsep"></span>' +
         '<button class="tbtn" id="btnRecord" title="录制宏 (Ctrl+Shift+R)">● 录制</button>' +
         '<button class="tbtn" id="btnPlay" title="回放宏 (Ctrl+Alt+P)">▶ 回放</button>' +
         '<span class="tsep"></span>' +
@@ -474,6 +486,7 @@
       });
       tb.querySelector('#btnRecord').addEventListener('click', () => this.exec('macro.record.toggle'));
       tb.querySelector('#btnPlay').addEventListener('click', () => this.exec('macro.playLast'));
+      tb.querySelector('#btnMdPreview').addEventListener('click', () => this.exec('md.toggleSplit'));
       tb.querySelector('#selLang').addEventListener('change', (e) => this.exec('lang.set', { id: e.target.value }));
       tb.querySelector('#selTheme').addEventListener('change', (e) => {
         this.settings.theme = e.target.value; this.saveSettings(); this._applySettings();
@@ -598,6 +611,7 @@
       this.activeTab = tab;
       this.view.setDocument(tab.doc, { scrollTop: tab.scrollTop });
       this.view.ac.hide();
+      if (this.preview) this.preview.onTabChange(tab);
       this.renderTabs();
       this.refreshAll();
       NT.bus.emit('doc:open', { doc: tab.doc, tab });
@@ -641,12 +655,14 @@
         '<div class="sb" id="sbSel"></div>' +
         '<div class="sb" id="sbLen"></div>' +
         '<div class="sb sb-right" id="sbPlugins"></div>' +
+        '<div class="sb clickable" id="sbMd" hidden title="点击切换 Markdown 阅读模式">编辑</div>' +
         '<div class="sb clickable" id="sbMode" title="点击切换轻量模式">完整模式</div>' +
         '<div class="sb" id="sbEol">LF</div>' +
         '<div class="sb">UTF-8</div>' +
         '<div class="sb clickable" id="sbLang">纯文本</div>';
       sb.querySelector('#sbLang').addEventListener('click', () => this._openMenu(this.el.menubar.querySelector('[data-menu="lang"]')));
       sb.querySelector('#sbMode').addEventListener('click', () => this.exec('view.toggleLightweight'));
+      sb.querySelector('#sbMd').addEventListener('click', () => this.exec('md.cycleMode'));
       this._sbPlugins = sb.querySelector('#sbPlugins');
       this._pluginStatusHost = document.createElement('div');
     }
@@ -673,6 +689,17 @@
       sb.querySelector('#sbEol').textContent = doc.eol === '\r\n' ? 'CRLF' : doc.eol === '\r' ? 'CR' : 'LF';
       sb.querySelector('#sbLang').textContent = NT.languages.get(doc.language).name;
       sb.querySelector('#sbMode').textContent = this.view.lightweight ? '轻量模式' : '完整模式';
+
+      // Markdown 模式指示：只在 Markdown 文档上出现，点击循环 编辑 → 分栏 → 阅读
+      const mdEl = sb.querySelector('#sbMd');
+      if (mdEl) {
+        const isMd = NT.markdown && NT.markdown.isMarkdown(doc);
+        mdEl.hidden = !isMd;
+        if (isMd && this.preview) mdEl.textContent = 'MD · ' + this.preview.modeLabel();
+      }
+
+      // 内容变了让预览跟上（防抖在 MarkdownPreview 内部）
+      if (this.preview) this.preview.scheduleRefresh();
 
       const sel = this.el.toolbar.querySelector('#selLang');
       if (sel && sel.value !== doc.language) sel.value = doc.language;
@@ -1384,7 +1411,7 @@
           const d = doc(); if (!d) return;
           const text = d.hasSel() ? d.selText() : d.lineAt(d.positionAt(d.sel.head).line) + '\n';
           try { await navigator.clipboard.writeText(text); this.toast('已复制', 'ok'); } catch (e) {
-            this.toast('复制失败（浏览器未授权剪贴板）', 'err');
+            this.toast('复制失败（剪贴板被占用或系统权限受限）', 'err');
           }
         } });
 
@@ -1393,7 +1420,7 @@
           try {
             const text = await navigator.clipboard.readText();
             view().insertText(text.replace(/\r\n?/g, '\n'));
-          } catch (e) { this.toast('粘贴失败：请使用 Ctrl+V 或授权剪贴板权限', 'err'); }
+          } catch (e) { this.toast('粘贴失败：剪贴板为空或无法访问', 'err'); }
         } });
 
       C({ id: 'edit.insertText', title: '插入文本', hidden: true,
@@ -1624,6 +1651,65 @@
           view().setLightweight(!view().lightweight);
           this.refreshStatus();
           this.toast('已' + (view().lightweight ? '开启' : '关闭') + '轻量模式（关闭语法高亮与折叠以提升大文件流畅度）', 'ok');
+        } });
+
+      /* ------------------------------------------------------ Markdown */
+      const mdOn = () => !!(this.preview && NT.markdown && NT.markdown.isMarkdown(doc()));
+
+      C({ id: 'md.toggleSplit', title: 'Markdown 分栏预览', keybinding: 'Ctrl+Shift+V', category: 'Markdown',
+        enabled: mdOn,
+        run: () => this.preview.toggle('split') });
+
+      C({ id: 'md.toggleRead', title: 'Markdown 阅读模式', keybinding: 'Ctrl+Shift+M', category: 'Markdown',
+        enabled: mdOn,
+        run: () => this.preview.toggle('read') });
+
+      C({ id: 'md.cycleMode', title: '循环切换 Markdown 视图', category: 'Markdown',
+        enabled: mdOn,
+        run: () => {
+          const order = ['edit', 'split', 'read'];
+          const cur = this.preview.mode;
+          this.preview.setMode(order[(order.indexOf(cur) + 1) % order.length]);
+        } });
+
+      C({ id: 'md.exportHtml', title: '导出为 HTML…', category: 'Markdown',
+        enabled: mdOn,
+        run: () => this.preview.exportHtml() });
+
+      /* 行内格式化：包裹选区（无选区时插入一对标记并把光标放中间） */
+      const wrap = (left, right, placeholder) => () => {
+        const d = doc();
+        if (!d) return;
+        const sel = d.selRange();
+        const text = sel.end > sel.start ? d.getRange(sel.start, sel.end) : (placeholder || '');
+        d.replaceRange(sel.start, sel.end, left + text + right, {
+          undo: 'type',
+          sel: { anchor: sel.start + left.length, head: sel.start + left.length + text.length }
+        });
+        view()._afterExternalEdit();
+      };
+
+      C({ id: 'md.bold', title: '加粗', keybinding: 'Ctrl+B', category: 'Markdown',
+        enabled: mdOn, run: wrap('**', '**', '粗体') });
+      C({ id: 'md.italic', title: '斜体', keybinding: 'Ctrl+I', category: 'Markdown',
+        enabled: mdOn, run: wrap('*', '*', '斜体') });
+      C({ id: 'md.strike', title: '删除线', keybinding: 'Ctrl+Shift+X', category: 'Markdown',
+        enabled: mdOn, run: wrap('~~', '~~', '删除线') });
+      C({ id: 'md.code', title: '行内代码', keybinding: 'Ctrl+`', category: 'Markdown',
+        enabled: mdOn, run: wrap('`', '`', 'code') });
+      C({ id: 'md.link', title: '插入链接', keybinding: 'Ctrl+K', category: 'Markdown',
+        enabled: mdOn,
+        run: () => {
+          const d = doc();
+          if (!d) return;
+          const sel = d.selRange();
+          const text = sel.end > sel.start ? d.getRange(sel.start, sel.end) : '链接文字';
+          const insert = '[' + text + '](https://)';
+          d.replaceRange(sel.start, sel.end, insert, {
+            undo: 'type',
+            sel: { anchor: sel.start + insert.length - 1, head: sel.start + insert.length - 1 }
+          });
+          view()._afterExternalEdit();
         } });
 
       /* ---------------------------------------------------------- 语言 */
