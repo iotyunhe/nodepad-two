@@ -552,6 +552,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 .bigfile-banner .btn { padding: 3px 10px; background: rgba(255,255,255,.9); border-color: transparent; color: #333; }
 
 </style>
+<script>window.__NT_CHANGELOG__ = "# 更新日志\n\n本项目的版本号遵循 `主版本.次版本.补丁`：\n\n- 修复缺陷 / 文案与配置调整 → 补丁位 +1\n- 新增向后兼容的功能 → 次版本 +1，补丁位归零\n- 不兼容的改动 → 主版本 +1，其余归零\n\n每次发版都会打同名 git 标签（`v1.1.1` 等），`git tag -l` 可查。\n\n---\n\n## [1.1.2] — 2026-10-19\n\n### 新增\n- 新增本文件 `CHANGELOG.md`，补齐 1.0.0 以来的全部版本记录。\n- 程序内新增 **帮助 → 更新日志**，弹层直接渲染本文件内容。\n  构建时由 `build.py` 把 `CHANGELOG.md` 注入产物，仓库文档与界面永远是同一份数据，不会出现两边不一致。\n\n### 变更\n- README 的「当前版本」改为跟踪最新版本，并链接到本文件。\n\n---\n\n## [1.1.1] — 2026-10-19\n\n### 变更\n- 右侧插件/宏/统计面板**默认收起**，只保留一条 22px 的竖向把手（竖排「面板」字样 + 箭头）。\n- 点击把手或按 `Ctrl+B` 可平滑展开/收起（160ms 宽度过渡），收起后完全不占编辑区宽度。\n- 老配置做一次性迁移：升级后原来的「展开」状态会被收起来一次，之后手动展开的选择正常记住。\n\n### 修复\n- 收起态残留 1px 分隔线导致布局轻微偏移。\n\n---\n\n## [1.1.0] — 2026-10-19\n\n### 新增\n- **打开 `.md` 自动进入分栏预览**：左源码、右渲染，分隔条可拖动调宽度。\n- 设置项 `mdAutoPreview`（默认开启），菜单入口「视图 → 打开 Markdown 时自动分栏」。\n- 超过 2 MB 或处于轻量模式的 Markdown 文件不自动渲染，避免卡顿。\n- 每个标签页各自记住视图状态（编辑 / 分栏 / 阅读），手动切回编辑不会被覆盖。\n\n### 修复\n- `bump-version.js` 中输出目录同步正则括号错位导致脚本语法错误。\n- 升级版本号时构建输出目录不同步（仍指向旧版本目录）。\n\n### 文档\n- README 新增「Markdown 文档」章节：三种视图、格式快捷键、支持的语法、安全说明。\n\n---\n\n## [1.0.2] — 2026-10-19\n\n### 修复\n- **复制粘贴不可用**：`desktop/main.js` 的权限处理器对所有请求一律拒绝，连带拦截了剪贴板 API。\n  现改为仅放行 `clipboard-read` / `clipboard-write` / `clipboard-sanitized-write`，\n  摄像头、麦克风、通知、定位等仍拒绝。\n- 复制/粘贴失败的提示文案去掉了误导性的「请授权剪贴板权限」。\n\n---\n\n## [1.0.1] — 2026-10-16\n\n### 修复\n- **MSI 在 per-user 安装模式下无法自选安装路径**：安装范围页的「下一步」直接跳到\n  「准备安装」，跳过了目录选择页。修正模板中两条互斥 `ControlEvent` 的目标，\n  并让目录页的「上一步」回到安装范围页。\n\n### 新增\n- `bump-version.js`：一条命令同步 `desktop/package.json` 与 `src/00-core.js` 的版本号，\n  支持 `patch|minor|major|X.Y.Z` 与 `--check` 校验。\n- `build.py` 构建时从 `package.json` 注入 `NT.version`，交付产物的版本号不再依赖手工同步。\n\n### 变更\n- 构建输出改到工作区外的 `../../notepad-two-dist/<version>`，仓库不再堆积构建产物。\n- 工作区产物整理：只保留 `release/` 一个交付目录。\n\n### 测试\n- 新增 MSI 目录页链路断言（`verify-installer-zh.py` 19 → 23 项）。\n- 新增版本号一致性断言（`core.test.js` 87 → 89 项）。\n\n---\n\n## [1.0.0] — 2026-10-15\n\n### 首个版本\n\n- **编辑内核**：行数组缓冲 + 惰性偏移索引、透明 textarea + 高亮覆盖层、可见行虚拟化。\n- **多标签页**：新建 / 关闭 / 拖拽排序 / 双击重命名 / 中键关闭 / 脏标记。\n- **语法高亮**：19 种语言（JS/TS/Python/HTML/XML/CSS/JSON/Markdown/C/C++/Java/C#/Go/Rust/SQL/Shell/YAML/INI/纯文本）。\n- **代码折叠**：括号配对 + 缩进层级 + `region` 标记，支持按层级折叠。\n- **自动补全**：关键字 / 类型 / 内置 API / 文档词 / 代码片段，支持插件扩展。\n- **查找替换**：正则、大小写、全词、选区内、`$1` 反向引用、全部替换可一次撤销。\n- **宏录制回放**：录制语义化命令，可命名 / 导出 / 导入，整段可撤销。\n- **插件机制**：9 个扩展点 + 生命周期管理 + 源码热加载，内置 5 个插件。\n- **大文件**：分片流式读取、三档性能自适应降级、虚拟化渲染。\n- **Markdown**：自研纯函数渲染器（零依赖、默认不透传原始 HTML），分栏 / 阅读 / 导出 HTML。\n- **中文化交付**：NSIS 与 MSI 安装向导全中文，程序默认语言 `zh-CN`。\n";</script>
 </head>
 <body>
 <div id="app">
@@ -598,7 +599,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
    *   · 改版本请用 `node bump-version.js patch|minor|major|X.Y.Z`（会同时改这里）；
    *   · build.py 打包时还会用 package.json 覆盖此字面量，确保交付产物一定正确；
    *   · core.test.js 有一条断言校验此处与 package.json 一致，漂移会被测出来。*/
-  NT.version = '1.1.1';
+  NT.version = '1.1.2';
 
   /* ------------------------------------------------------------------ 事件总线
    * 全局单例。约定的事件名（节选）：
@@ -5430,6 +5431,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         ],
         help: [
           mi('help', '快捷键总览', 'help.shortcuts'),
+          mi('help', '更新日志', 'help.changelog'),
           mi('help', '关于 Notepad Two', 'help.about')
         ]
       };
@@ -6924,6 +6926,26 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
             this.el.overlay.hidden = true;
           });
         } });
+      C({ id: 'help.changelog', title: '更新日志', category: '帮助',
+        run: () => {
+          const src = global.__NT_CHANGELOG__ || '';
+          if (!src) {
+            this.toast('开发态未注入更新日志，请查看项目根目录的 CHANGELOG.md', 'warn');
+            return;
+          }
+          const body = (NT.markdown && NT.markdown.render)
+            ? NT.markdown.render(src)
+            : '<pre style="white-space:pre-wrap">' + U.esc(src) + '</pre>';
+          this.el.overlayCard.innerHTML = '<h3>更新日志 · 当前版本 v' + NT.version + '</h3>' +
+            '<div class="md-preview-body" style="max-height:62vh;overflow:auto;padding:0 6px 0 0">' +
+            body + '</div>' +
+            '<div class="oactions"><button class="btn primary" data-r="ok">关闭</button></div>';
+          this.el.overlay.hidden = false;
+          this.el.overlayCard.querySelector('[data-r]').addEventListener('click', () => {
+            this.el.overlay.hidden = true;
+          });
+        } });
+
       C({ id: 'help.about', title: '关于', category: '帮助',
         run: async () => {
           const d = doc();

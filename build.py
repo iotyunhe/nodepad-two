@@ -63,6 +63,15 @@ def main():
         print('警告: 读不到 desktop/package.json 的 version，'
               'NT.version 将保持源码字面量', file=sys.stderr)
 
+    # 0) 把 CHANGELOG.md 注入产物：应用内「帮助 → 更新日志」直接读这份数据，
+    #    保证仓库里的文档和界面上看到的永远是同一份内容。
+    changelog_path = os.path.join(ROOT, 'CHANGELOG.md')
+    has_changelog = os.path.exists(changelog_path)
+    if has_changelog:
+        payload = json.dumps(read(changelog_path), ensure_ascii=False).replace('</', '<\\/')
+        inject = ('<script>window.__NT_CHANGELOG__ = ' + payload + ';</script>\n')
+        html = html.replace('</head>', inject + '</head>', 1)
+
     # 1) 内联样式
     def inline_css(m):
         href = m.group(1)
@@ -98,6 +107,7 @@ def main():
 
     size = os.path.getsize(OUT)
     print('内联样式 %d 个、脚本 %d 个' % (n_css, n_js))
+    print('更新日志: %s' % ('已注入 CHANGELOG.md' if has_changelog else '未找到 CHANGELOG.md'))
     if app_version:
         if n_ver == 0:
             print('警告: 未在源码中找到 NT.version 赋值，版本号未被写入',
