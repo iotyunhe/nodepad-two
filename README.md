@@ -281,6 +281,29 @@ env -u ELECTRON_RUN_AS_NODE "Notepad Two.exe" --smoke-test --smoke-out=result.js
 > `ELECTRON_RUN_AS_NODE=1` 若已存在于环境变量中，会让 Electron 退化为纯 Node 模式，
 > 因此需要用 `env -u` 先移除它。
 
+### 发布到 GitHub Releases
+
+安装包体积约 90–110 MB，不适合进 git（`release/` 已在 `.gitignore` 中），
+因此通过 Releases 分发：
+
+```bash
+# 1) 生成 token：https://github.com/settings/tokens
+#    classic token，勾选 repo（或 fine-grained 的 Contents: Read and write）
+export GITHUB_TOKEN=ghp_xxxxxxxx
+
+# 2) 先空跑确认要做什么（不发请求）
+cd desktop && npm run publish:release -- --dry-run
+
+# 3) 真正上传：自动建 tag 对应的 Release，并附上 exe / msi
+npm run publish:release
+```
+
+脚本会自动从 `CHANGELOG.md` 抽取当前版本的章节作为 Release 说明，
+已存在的资产会跳过，重复执行是安全的。
+
+> Release 走的是 REST API，**git 的 SSH 密钥对 API 无效**，
+> 必须用 Personal Access Token。token 只从环境变量读取，不会写进任何文件。
+
 ### 桌面版与 Web 版的差异
 
 桌面版接管了文件相关的命令，改用原生对话框与直接磁盘读写：

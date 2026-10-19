@@ -1,7 +1,7 @@
 {
   "name": "notepad-two",
   "productName": "Notepad Two",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "description": "高性能多标签文本编辑器 —— 多标签、语法高亮、代码折叠、自动补全、正则查找替换、宏录制、插件扩展、大文件秒开",
   "main": "main.js",
   "author": {
@@ -19,7 +19,8 @@
     "start": "node prepare-app.js && electron .",
     "dist": "node patch-builder-templates.js && node prepare-app.js && electron-builder --win nsis msi",
     "dist:nsis": "node patch-builder-templates.js && node prepare-app.js && electron-builder --win nsis",
-    "dist:msi": "node patch-builder-templates.js && node prepare-app.js && electron-builder --win msi"
+    "dist:msi": "node patch-builder-templates.js && node prepare-app.js && electron-builder --win msi",
+    "publish:release": "node ../scripts/publish-release.js"
   },
   "devDependencies": {
     "electron": "38.8.6",
@@ -31,7 +32,7 @@
     "copyright": "Copyright © 2026 Notepad Two",
     "asar": true,
     "directories": {
-      "output": "../../notepad-two-dist/1.1.3",
+      "output": "../../notepad-two-dist/1.1.4",
       "buildResources": "build"
     },
     "files": [

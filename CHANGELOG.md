@@ -10,6 +10,20 @@
 
 ---
 
+## [1.1.4] — 2026-10-19
+
+### 新增
+- `scripts/publish-release.js`：一条命令把 `release/` 里的安装包发布到 GitHub Releases。
+  自动识别仓库与版本、从本文件抽取对应版本的说明作为 Release 正文，
+  支持 `--dry-run`（只看流程）与 `--draft`（先存草稿）。
+  因为 Release 走 REST API，**必须用 Personal Access Token**，
+  git 使用的 SSH 密钥对 API 无效。
+
+### 变更
+- `desktop/package.json` 增加 `npm run publish:release` 快捷方式。
+
+---
+
 ## [1.1.3] — 2026-10-19
 
 ### 新增
