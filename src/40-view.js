@@ -23,6 +23,15 @@
  *   · 渲染只处理可见行 ± OVERSCAN，行号槽与高亮层同样只渲染可见部分；
  *   · 分词结果按行缓存，并维护「行首词法状态」前缀链，编辑后只失效受影响的后缀；
  *   · 超过阈值自动进入轻量模式（关闭分词/折叠/文档词补全）。
+ *
+ * 【自动换行（soft wrap）】
+ * 换行只改「显示」不改「文本」：textarea 用 wrap="soft"，高亮层用等价的
+ * pre-wrap + break-word，两层靠同一套字体与宽度自然折行。
+ * 难点在于虚拟化 —— 一旦折行，每行占的高度不再恒定，只渲染可见行就必须知道
+ * 每一行折了几个视觉行。为此维护 rowTop（行 → 顶部 Y）与 wrapRows（行 → 视觉行数）：
+ *   · 视觉行数由 38-wrap.js 按像素宽度解析计算；
+ *   · 渲染后读一次真实行高做校正，误差归零（wrapOverride）；
+ *   · 未开启换行时这两个数组完全不建，位置纯算术得出，避免大文件退化。
  * ========================================================================== */
 (function (global) {
   'use strict';
@@ -59,9 +68,26 @@
       this.composing = false;
       this.ac = null;               // 补全控制器（由 50-completion.js 装配）
 
-      this.metrics = { lh: 20, cw: 8, padTop: 8, padLeft: 14, digits: 3 };
+      this.metrics = { lh: 20, cw: 8, cwWide: 16, padTop: 8, padLeft: 14, padRight: 14, digits: 3 };
       this._rafPending = false;
       this._lastRender = { first: -1, last: -1, version: -1 };
+
+      /* --- 自动换行状态 ---
+       * wrap        : 用户开关
+       * wrapWidth   : 当前宽度下一行可用的像素宽度
+       * wrapRows[v] : 视图行 v 折成几个视觉行（未换行时恒为 1）
+       * rowTop[v]   : 视图行 v 的顶部 Y（相对内容起点，不含 padTop），长度 = 行数+1
+       * 这两个数组是换行模式下「虚拟化」的关键：有了它才能只渲染可见行，
+       * 同时把高亮层 / 行号槽 / 当前行底色精确对齐到滚动位置。 */
+      this.wrap = false;
+      this.wrapWidth = 0;
+      this.wrapRows = [];
+      this.rowTop = [];
+      this.wrapOverride = new Map();   // 视图行 -> 实测视觉行数（DOM 校正结果）
+      this._wrapDirtyFrom = Infinity;
+      this._wrapScrollW = -1;
+      this._wrapMeasureDirty = true;
+      this._wrapFixRounds = 0;
 
       this._buildDom();
       this._bindEvents();
@@ -76,6 +102,7 @@
         '<div class="nt-gutter"><div class="nt-gutter-inner"></div></div>' +
         '<div class="nt-scroll">' +
           '<div class="nt-curline"></div>' +
+          '<span class="nt-probe" aria-hidden="true"></span>' +
           '<pre class="nt-hl"><code></code></pre>' +
           '<textarea class="nt-input" spellcheck="false" autocomplete="off" ' +
             'autocorrect="off" autocapitalize="off" wrap="off"></textarea>' +
@@ -85,6 +112,7 @@
       this.gutterInner = wrap.querySelector('.nt-gutter-inner');
       this.scroll = wrap.querySelector('.nt-scroll');
       this.curLine = wrap.querySelector('.nt-curline');
+      this.probe = wrap.querySelector('.nt-probe');
       this.hl = wrap.querySelector('.nt-hl');
       this.hlCode = wrap.querySelector('.nt-hl code');
       this.input = wrap.querySelector('.nt-input');
@@ -93,15 +121,32 @@
 
     _measure() {
       const cs = getComputedStyle(this.input);
-      const font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-      const ctx = EditorView._measureCtx ||
-        (EditorView._measureCtx = document.createElement('canvas').getContext('2d'));
-      ctx.font = font;
-      const w = ctx.measureText('MMMMMMMMMMMMMMMMMMMM').width / 20;
-      this.metrics.cw = w > 0 ? w : 8;
+      // 单字符宽度必须用真实排版来量：canvas.measureText 与 DOM 的实际步进
+      // 会差零点几个像素，累到几十列之后就会让折行点算错，表现为高亮层与
+      // 输入框的文字错位。这里用一个隐藏探针直接读 DOM 宽度。
+      let cw = 0, cwWide = 0;
+      if (this.probe) {
+        this.probe.textContent = 'M'.repeat(64);
+        cw = this.probe.getBoundingClientRect().width / 64;
+        this.probe.textContent = '中'.repeat(32);
+        cwWide = this.probe.getBoundingClientRect().width / 32;
+      }
+      if (!(cw > 0)) {
+        const font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+        const ctx = EditorView._measureCtx ||
+          (EditorView._measureCtx = document.createElement('canvas').getContext('2d'));
+        ctx.font = font;
+        cw = ctx.measureText('MMMMMMMMMMMMMMMMMMMM').width / 20;
+      }
+      this.metrics.cw = cw > 0 ? cw : 8;
+      this.metrics.cwWide = cwWide > 0 ? cwWide : this.metrics.cw * 2;
       this.metrics.lh = parseFloat(cs.lineHeight) || 20;
       this.metrics.padTop = parseFloat(cs.paddingTop) || 8;
       this.metrics.padLeft = parseFloat(cs.paddingLeft) || 14;
+      this.metrics.padRight = parseFloat(cs.paddingRight) || 0;
+      // 字号/内边距变化 → 每行能放的列数变了，换行索引必须重算
+      this._wrapMeasureDirty = true;
+      this._invalidateWrap(0);
     }
 
     /* ------------------------------------------------------------ 事件绑定 */
@@ -127,6 +172,21 @@
       });
 
       window.addEventListener('resize', U.debounce(() => { this._measure(); this.render(); }, 120));
+
+      /* 编辑器容器的尺寸不一定随窗口变化：展开侧边栏、打开 Markdown 分栏预览、
+       * 拖动分隔条都会改变文本区宽度，而 window 的 resize 事件不会触发。
+       * 换行模式下宽度变了就必须重新测量列宽并重排，否则高亮层会与输入框错位。 */
+      if (typeof ResizeObserver !== 'undefined') {
+        this._lastBox = { w: -1, h: -1 };
+        this._ro = new ResizeObserver(() => {
+          const w = this.scroll.clientWidth, h = this.scroll.clientHeight;
+          if (w === this._lastBox.w && h === this._lastBox.h) return;
+          this._lastBox = { w, h };
+          this._measure();
+          this.render(true);
+        });
+        this._ro.observe(this.scroll);
+      }
     }
 
     /* --------------------------------------------------------- 文档装配 */
@@ -142,6 +202,10 @@
       this.input.scrollTop = opts.scrollTop || 0;
       this.input.scrollLeft = 0;
       this._updateGutterWidth();
+      this._wrapMeasureDirty = true;      // 新文档可能带来/去掉滚动条
+      this._invalidateWrap(0);
+      this.el.classList.toggle('wrap-on', this.wrapActive);
+      this.input.setAttribute('wrap', this.wrapActive ? 'soft' : 'off');
       this.setSelFromDoc();
       this.render(true);
     }
@@ -156,6 +220,114 @@
       this.tokenCache.clear();
       this.lineStates = [];
       this._maxStateIndex = -1;
+    }
+
+    /* ------------------------------------------------------ 自动换行索引 */
+    /** 换行是否真正生效：轻量模式（超大文件）下强制关闭，避免逐行排版卡顿 */
+    get wrapActive() { return !!(this.wrap && !this.lightweight); }
+
+    setWordWrap(on) {
+      on = !!on;
+      if (this.wrap === on) return;
+      this.wrap = on;
+      this.el.classList.toggle('wrap-on', this.wrapActive);
+      this.input.setAttribute('wrap', this.wrapActive ? 'soft' : 'off');
+      this.input.scrollLeft = 0;
+      this._wrapMeasureDirty = true;
+      this._invalidateWrap(0);
+      if (this.doc) {
+        this.render(true);
+        this.revealCaret();
+      }
+    }
+
+    _invalidateWrap(from) {
+      const f = from === undefined ? 0 : from;
+      if (!(f >= 0)) return;
+      if (this._wrapDirtyFrom > f) this._wrapDirtyFrom = f;
+      // 实测校正结果按视图行号缓存，行号会平移，所以从 f 起全部作废
+      if (this.wrapOverride.size) {
+        if (f === 0) this.wrapOverride.clear();
+        else for (const k of Array.from(this.wrapOverride.keys())) if (k >= f) this.wrapOverride.delete(k);
+      }
+    }
+
+    /** 刷新「一行能放多宽」以及滚动条占位（只在尺寸/字号变化时读布局） */
+    _refreshWrapMetrics() {
+      if (!this._wrapMeasureDirty) return;
+      this._wrapMeasureDirty = false;
+      const sw = Math.max(0, this.input.offsetWidth - this.input.clientWidth);
+      const avail = Math.max(0, this.input.clientWidth - this.metrics.padLeft - this.metrics.padRight);
+      if (sw !== this._wrapScrollW) {
+        this._wrapScrollW = sw;
+        // 高亮层没有滚动条，右侧补上等宽的内边距，折行点才能和 textarea 完全一致
+        this.hl.style.paddingRight = (this.metrics.padRight + sw) + 'px';
+        this._invalidateWrap(0);
+      }
+      if (avail !== this.wrapWidth) {
+        this.wrapWidth = avail;
+        this._invalidateWrap(0);
+      }
+    }
+
+    /**
+     * 维护 rowTop / wrapRows（仅换行模式需要）。
+     * rowTop[v] = 视图行 v 的顶部 Y（不含 padTop），长度恒为 行数+1；
+     * wrapRows[v] = 该行折成几个视觉行。
+     * 支持从任意行增量重算：打字只影响当前行及之后，不必整篇重排。
+     */
+    _ensureWrapIndex() {
+      if (!this.wrapActive) {
+        /* 不换行时行高恒定，位置全部可以纯算术得出（v * lh），
+         * 绝不能在这里建 rowTop 数组 —— 百万行文件每敲一个键重建一次会卡死。 */
+        if (this.rowTop.length) { this.rowTop.length = 0; this.wrapRows.length = 0; }
+        this._wrapDirtyFrom = Infinity;
+        return;
+      }
+      const total = this.viewLineCount;
+      const lh = this.metrics.lh;
+      const rowTop = this.rowTop;
+      const wrapRows = this.wrapRows;
+
+      this._refreshWrapMetrics();
+      const avail = this.wrapWidth;
+      const narrow = this.metrics.cw;
+      const wide = this.metrics.cwWide;
+      const tab = this.tabSize * narrow;
+
+      let from = this._wrapDirtyFrom;
+      if (from === Infinity) {
+        if (rowTop.length === total + 1) return;
+        from = 0;
+      }
+      if (from > total) from = total;
+      if (rowTop.length !== total + 1 || from === 0) from = 0;
+
+      rowTop.length = total + 1;
+      wrapRows.length = total;
+      let y = from === 0 ? 0 : (rowTop[from] || 0);
+      for (let v = from; v < total; v++) {
+        const f = this.foldAtView.get(v);
+        const text = f ? PLACEHOLDER(f.count)
+          : (this.doc.lines[this.docLineOf(v)] === undefined ? '' : this.doc.lines[this.docLineOf(v)]);
+        const ov = this.wrapOverride.get(v);
+        const r = ov !== undefined ? ov : NT.wrap.rows(text, avail, narrow, wide, tab);
+        wrapRows[v] = r;
+        rowTop[v] = y;
+        y += r * lh;
+      }
+      rowTop[total] = y;
+      this._wrapDirtyFrom = Infinity;
+    }
+
+    /** 视图行 v 的顶部 Y（不含 padTop） */
+    _topOf(v) {
+      const t = this.rowTop[v];
+      return t === undefined ? v * this.metrics.lh : t;
+    }
+    /** 视图行 v 占用的像素高度 */
+    _heightOf(v) {
+      return (this.wrapActive ? (this.wrapRows[v] || 1) : 1) * this.metrics.lh;
     }
 
     get tabSize() { return (this.app && this.app.settings && this.app.settings.tabSize) || 4; }
@@ -292,6 +464,8 @@
 
       // 分词缓存失效：只清受影响的行后缀
       this._invalidateFrom(startPos.line);
+      // 换行索引失效：有折叠时视图行与文档行不再一一对应，保守起见整体重算
+      this._invalidateWrap(this.hasFolds ? 0 : startPos.line);
 
       // 视图映射维护。
       // 折叠区之后发生的编辑：折叠区的行号不受影响，可以增量更新映射（O(1)）。
@@ -339,6 +513,8 @@
       this.foldModel = this.lightweight ? null : NT.folds.ensure(doc);
       this._rebuildViewMap();
       this._rebuildViewText();
+      this._wrapMeasureDirty = true;
+      this._invalidateWrap(0);
       const sel = { anchor: this.docToViewOffset(doc.sel.anchor), head: this.docToViewOffset(doc.sel.head) };
       this.input.value = this.viewText;
       this.input.setSelectionRange(sel.anchor, sel.head);
@@ -461,14 +637,29 @@
 
     render(force) {
       if (!this.doc) return;
+      this._ensureWrapIndex();
       const lh = this.metrics.lh;
       const st = this.input.scrollTop, sl = this.input.scrollLeft;
       const total = this.viewLineCount;
       const viewH = this.scroll.clientHeight;
+      const rowTop = this.rowTop;
 
-      let first = Math.floor((st - this.metrics.padTop) / lh) - OVERSCAN;
-      first = U.clamp(first, 0, Math.max(0, total - 1));
-      let last = Math.min(total, first + Math.ceil(viewH / lh) + OVERSCAN * 2 + 2);
+      let first, last;
+      if (this.wrapActive) {
+        /* 换行模式：行高不固定，用 rowTop 二分定位可见区间 */
+        const y = st - this.metrics.padTop;
+        let f = U.lowerBound(rowTop, y);          // 滚动顶部所在的视图行
+        if (f < 0) f = 0;
+        first = Math.max(0, f - OVERSCAN);
+        let e = U.lowerBound(rowTop, y + viewH + OVERSCAN * lh);
+        if (e < 0) e = 0;
+        last = Math.min(total, e + 1 + OVERSCAN);
+        if (last <= first) last = Math.min(total, first + 1);
+      } else {
+        first = Math.floor((st - this.metrics.padTop) / lh) - OVERSCAN;
+        first = U.clamp(first, 0, Math.max(0, total - 1));
+        last = Math.min(total, first + Math.ceil(viewH / lh) + OVERSCAN * 2 + 2);
+      }
 
       const dirty = force || first !== this._lastRender.first || last !== this._lastRender.last ||
         this._lastRender.version !== this.doc.version || this._lastRender.scroll !== st;
@@ -488,8 +679,37 @@
         }
       }
       this.hlCode.innerHTML = rows.join('');
-      this.hlCode.style.transform = 'translateY(' + (first * lh - st) + 'px)';
-      this.hl.style.transform = 'translateX(' + (-sl) + 'px)';
+
+      /* ---- 换行模式：用真实排版结果校正预测值 ----
+       * 换行列数是按「可用宽度 / 单字符宽度」估出来的，遇到宽字符、制表符、
+       * 字体回退等情况可能与浏览器实际断行差一行。这里直接读已渲染行的高度，
+       * 把实测结果写回 wrapRows 并重排一次，保证行号槽 / 当前行底色 / 高亮层
+       * 三者严格对齐。校正过的行不会再变，所以最多重排几轮就收敛。 */
+      if (this.wrapActive) {
+        if (this._wrapFixRounds < 3) {
+          const kids = this.hlCode.children;
+          let changedAt = -1;
+          for (let i = 0; i < kids.length; i++) {
+            const v = first + i;
+            const r = Math.max(1, Math.round(kids[i].offsetHeight / lh));
+            if (r !== this.wrapRows[v]) {
+              this.wrapRows[v] = r;
+              this.wrapOverride.set(v, r);
+              if (changedAt < 0) changedAt = v;
+            }
+          }
+          if (changedAt >= 0) {
+            this._wrapDirtyFrom = Math.min(this._wrapDirtyFrom, changedAt);
+            this._wrapFixRounds++;
+            this.render(true);
+            return;
+          }
+        }
+        this._wrapFixRounds = 0;
+      }
+
+      this.hlCode.style.transform = 'translateY(' + (this._topOf(first) - st) + 'px)';
+      this.hl.style.transform = 'translateX(' + (this.wrapActive ? 0 : -sl) + 'px)';
 
       /* ---- 行号槽 ---- */
       this._renderGutter(first, last, st);
@@ -500,7 +720,8 @@
       const cvl = this.viewLineOf(caretPos.line);
       const visible = cvl >= first - 1 && cvl <= last;
       this.curLine.style.display = visible ? 'block' : 'none';
-      this.curLine.style.transform = 'translateY(' + (this.metrics.padTop + cvl * lh - st) + 'px)';
+      this.curLine.style.height = this._heightOf(cvl) + 'px';
+      this.curLine.style.transform = 'translateY(' + (this.metrics.padTop + this._topOf(cvl) - st) + 'px)';
 
       this._lastRender.first = first;
       this._lastRender.last = last;
@@ -514,14 +735,18 @@
       const sel = this.doc.selRange();
       const from = this.doc.positionAt(sel.start).line;
       const to = this.doc.positionAt(sel.end).line;
+      const wrapped = this.wrapActive;
+      const lh = this.metrics.lh;
 
       for (let v = first; v < last; v++) {
         const dl = this.docLineOf(v);
         const placeholder = this.foldAtView.get(v);
+        // 换行时行号块要跟着长高，才能和右侧折行后的文本对齐
+        const hStyle = wrapped ? ' style="height:' + (this.wrapRows[v] || 1) * lh + 'px"' : '';
         if (placeholder) {
           // 占位行：不给行号（避免与折叠起始行重复），只显示折叠标记
           parts[v - first] =
-            '<div class="nt-ln folded" data-line="' + dl + '">' +
+            '<div class="nt-ln folded" data-line="' + dl + '"' + hStyle + '>' +
             '<span class="ln-fold has" title="展开">▶</span>' +
             '<span class="ln-num" style="color:var(--fg-faint)">⋯</span></div>';
           continue;
@@ -535,17 +760,20 @@
           : '<span class="ln-fold"></span>';
         parts[v - first] =
           '<div class="nt-ln' + (active ? ' active' : '') + (isCollapsed ? ' folded' : '') +
-          '" data-line="' + dl + '">' + fold +
+          '" data-line="' + dl + '"' + hStyle + '>' + fold +
           '<span class="ln-num">' + (dl + 1) + '</span></div>';
       }
       this.gutterInner.innerHTML = parts.join('');
-      this.gutterInner.style.transform = 'translateY(' + (this.metrics.padTop + first * this.metrics.lh - st) + 'px)';
+      this.gutterInner.style.transform =
+        'translateY(' + (this.metrics.padTop + this._topOf(first) - st) + 'px)';
     }
 
     _updateGutterWidth() {
       const total = this.doc ? this.doc.lines.length : 1;
       this.metrics.digits = String(total).length;
       this.gutter.style.minWidth = (this.metrics.digits * 8 + 34) + 'px';
+      // 行号槽变宽/变窄会改变文本可用宽度，折行列数需要重新测量
+      this._wrapMeasureDirty = true;
     }
 
     /* ------------------------------------------------------------ 选区同步 */
@@ -585,13 +813,34 @@
 
     /** 保证光标可见（必要时滚动） */
     revealCaret() {
+      if (!this.doc) return;
+      this._ensureWrapIndex();
       const p = this.caret;
       const vl = this.viewLineOf(p.line);
       const lh = this.metrics.lh;
+      const st = this.input.scrollTop;
+      const vh = this.scroll.clientHeight;
+
+      /* 换行模式：光标可能落在某一行的第 n 个视觉行上，纵向按视觉行算，
+         横向不再需要滚动（soft wrap 下没有水平滚动条） */
+      if (this.wrapActive) {
+        const text = this.doc.lines[p.line] === undefined ? '' : this.doc.lines[p.line];
+        const loc = NT.wrap.locate(text, p.col, this.wrapWidth,
+          this.metrics.cw, this.metrics.cwWide, this.tabSize * this.metrics.cw);
+        const top = this.metrics.padTop + this._topOf(vl) + loc.row * lh;
+        const bottom = top + lh;
+        if (top - this.metrics.padTop < st) {
+          this.input.scrollTop = Math.max(0, top - this.metrics.padTop - lh * 2);
+        } else if (bottom > st + vh) {
+          this.input.scrollTop = bottom - vh + lh * 2;
+        }
+        if (this.input.scrollLeft) this.input.scrollLeft = 0;
+        this.scheduleRender();
+        return;
+      }
+
       const top = this.metrics.padTop + vl * lh;
       const bottom = top + lh;
-      const vh = this.scroll.clientHeight;
-      const st = this.input.scrollTop;
       if (top - this.metrics.padTop < st) this.input.scrollTop = Math.max(0, top - this.metrics.padTop - lh * 2);
       else if (bottom > st + vh) this.input.scrollTop = bottom - vh + lh * 2;
 
@@ -604,15 +853,16 @@
     }
 
     scrollToLine(line, center) {
+      this._ensureWrapIndex();
       const vl = this.viewLineOf(U.clamp(line, 0, this.doc.lines.length - 1));
       const lh = this.metrics.lh;
+      const base = this.metrics.padTop + this._topOf(vl);
       if (center) {
-        this.input.scrollTop = Math.max(0, this.metrics.padTop + vl * lh - this.scroll.clientHeight / 2);
+        this.input.scrollTop = Math.max(0, base - this.scroll.clientHeight / 2);
       } else {
-        const top = this.metrics.padTop + vl * lh;
         const vh = this.scroll.clientHeight;
-        if (top < this.input.scrollTop || top > this.input.scrollTop + vh - lh) {
-          this.input.scrollTop = Math.max(0, top - vh / 2);
+        if (base < this.input.scrollTop || base > this.input.scrollTop + vh - lh) {
+          this.input.scrollTop = Math.max(0, base - vh / 2);
         }
       }
       this.scheduleRender();
@@ -685,8 +935,19 @@
     /* -------------------------------------------------------- 屏幕坐标换算 */
     /** 文档偏移 → 相对 .nt-editor 的像素坐标（补全弹窗定位用） */
     pointAt(docOffset) {
+      this._ensureWrapIndex();
       const pos = this.doc.positionAt(docOffset);
       const vl = this.viewLineOf(pos.line);
+      if (this.wrapActive) {
+        const text = this.doc.lines[pos.line] === undefined ? '' : this.doc.lines[pos.line];
+        const loc = NT.wrap.locate(text, pos.col, this.wrapWidth,
+          this.metrics.cw, this.metrics.cwWide, this.tabSize * this.metrics.cw);
+        return {
+          x: this.gutter.offsetWidth + this.metrics.padLeft + loc.x,
+          y: this.metrics.padTop + this._topOf(vl) + (loc.row + 1) * this.metrics.lh - this.input.scrollTop,
+          line: pos.line, col: pos.col
+        };
+      }
       return {
         x: this.gutter.offsetWidth + this.metrics.padLeft + pos.col * this.metrics.cw - this.input.scrollLeft,
         y: this.metrics.padTop + (vl + 1) * this.metrics.lh - this.input.scrollTop,
@@ -704,16 +965,18 @@
       const r = this.doc.selRange();
       const ch = this.doc.replaceRange(r.start, r.end, text, { undo: opt.undo || 'type' });
       if (!ch) return r.start;
-      this._invalidateFrom(this.doc.positionAt(r.start).line);
-      this._afterExternalEdit();
+      const fromLine = this.doc.positionAt(r.start).line;
+      this._invalidateFrom(fromLine);
+      this._afterExternalEdit(fromLine);
       return r.start + text.length;
     }
 
     /** 外部编辑（命令/宏/插件）后统一走这里同步视图 */
-    _afterExternalEdit() {
+    _afterExternalEdit(fromLine) {
       this._lastRender.version = -1;
       if (this.hasFolds) this._fullResync();
       else {
+        this._invalidateWrap(fromLine === undefined ? 0 : fromLine);
         this.viewText = this.doc.getText();
         this.input.value = this.viewText;
         this.setSelFromDoc();
@@ -796,7 +1059,7 @@
       this._invalidateFrom(from);
       const newStart = doc.offsetAt(from, 0);
       const newEnd = doc.lineEndOffset(to);
-      this._afterExternalEdit();
+      this._afterExternalEdit(from);
       this.setSelFromDoc(newStart, newEnd);
     }
 
@@ -837,7 +1100,7 @@
         const PAIRS = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`' };
         if (PAIRS[before] && PAIRS[before] === after) {
           doc.remove(sel.start - 1, sel.start + 1, { undo: 'delete' });
-          this._afterExternalEdit();
+          this._afterExternalEdit(doc.positionAt(sel.start - 1).line);
           return true;
         }
       }
@@ -850,7 +1113,7 @@
         const unit = this._indentUnit();
         const n = Math.min(unit.length, p.col);
         doc.remove(sel.start - n, sel.start, { undo: 'delete' });
-        this._afterExternalEdit();
+        this._afterExternalEdit(p.line);
         return true;
       }
       return false;
@@ -891,7 +1154,7 @@
         doc.replaceRange(sel.start, sel.end, key + text + closer, {
           undo: 'type', sel: { anchor: sel.start + 1, head: sel.start + 1 + text.length }
         });
-        this._afterExternalEdit();
+        this._afterExternalEdit(doc.positionAt(sel.start).line);
         return true;
       }
       if (nextCh === closer) {
@@ -912,6 +1175,9 @@
       if (this.lightweight === on) return;
       this.lightweight = on;
       this._resetCaches();
+      // 轻量模式会强制关闭换行，class / wrap 属性要跟着同步
+      this.el.classList.toggle('wrap-on', this.wrapActive);
+      this.input.setAttribute('wrap', this.wrapActive ? 'soft' : 'off');
       this._fullResync();
     }
   }

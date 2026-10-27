@@ -6,6 +6,7 @@ const NT = require(path.join(__dirname, '..', 'src', '00-core.js'));
 require(path.join(__dirname, '..', 'src', '10-document.js'));
 require(path.join(__dirname, '..', 'src', '20-languages.js'));
 require(path.join(__dirname, '..', 'src', '30-folds.js'));
+require(path.join(__dirname, '..', 'src', '38-wrap.js'));
 require(path.join(__dirname, '..', 'src', '60-search.js'));
 
 let pass = 0, fail = 0;
@@ -279,6 +280,64 @@ function ok(cond, name) { if (cond) pass++; else { fail++; console.error('✗ ' 
   eq(big.lines[0], 'b', '首行已替换');
   eq(big.lines[N - 1], 'b', '末行已替换');
   ok(ms < 20000, '超上限替换未退化为 O(N²)（耗时 ' + ms + 'ms）');
+}
+
+/* ------------------------------------------- 自动换行排版（38-wrap.js）
+ * 单位是像素：avail = 可用宽度，narrow = 窄字符宽，wide = 宽字符宽，tab = 制表位宽 */
+{
+  const W = NT.wrap;
+  const N = 10, WD = 20, TAB = 40, A = 100;   // 相当于 tabSize=4 的等宽字体
+
+  eq(W.rows('', A, N, WD, TAB), 1, '换行：空行算 1 个视觉行');
+  eq(W.rows('abc', A, N, WD, TAB), 1, '换行：短行不折');
+  eq(W.rows('a'.repeat(10), A, N, WD, TAB), 1, '换行：刚好填满不折');
+  eq(W.rows('a'.repeat(11), A, N, WD, TAB), 2, '换行：超出 1 个字符折成 2 行');
+  eq(W.rows('a'.repeat(30), A, N, WD, TAB), 3, '换行：3 倍宽折成 3 行');
+
+  // 在空白处断行：行尾空格悬挂，不计入下一行
+  eq(W.rows('hello world foobar', 120, N, WD, TAB), 2, '换行：优先在空格处断开');
+  eq(W.measure('hello world foobar', 120, N, WD, TAB).starts, [0, 12], '换行：恰好填满时在边界断行');
+  // "hello " 只占 6 列，但下一个词 worldfoo 放不下 → 断点回退到空格之后
+  eq(W.measure('hello worldfoo', 120, N, WD, TAB).starts, [0, 6], '换行：放不下整词时回退到空格后断开');
+
+  // 超长单词：按字符硬切（对应 overflow-wrap: break-word）
+  eq(W.rows('x'.repeat(45), A, N, WD, TAB), 5, '换行：超长单词硬切');
+
+  // 制表符按 tab-stop 展开
+  eq(W.rows('\t', TAB, N, WD, TAB), 1, '换行：单个制表符占满一行');
+  eq(W.rows('\t\t', TAB, N, WD, TAB), 2, '换行：两个制表符折成 2 行');
+  eq(W.rows('a\tb', TAB, N, WD, TAB), 2, '换行：a + tab 正好占满，b 被挤到下一行');
+  eq(W.rows('a\tb', TAB + N, N, WD, TAB), 1, '换行：a + tab + b 放得下');
+  eq(W.charW(9, 0, N, WD, TAB), TAB, '换行：行首制表符跳到第一个制表位');
+  eq(W.charW(9, 30, N, WD, TAB), 10, '换行：制表符按当前 x 补到下一个制表位');
+
+  // 东亚宽字符用单独的宽度（真实字体里并不是窄字符的 2 倍）
+  eq(W.isWide('中'.charCodeAt(0)), true, '换行：汉字为宽字符');
+  eq(W.isWide('a'.charCodeAt(0)), false, '换行：ASCII 为窄字符');
+  eq(W.rows('中文中文中文', 120, N, WD, TAB), 1, '换行：6 个汉字正好 120px');
+  eq(W.rows('中文中文中文', 60, N, WD, TAB), 2, '换行：6 个汉字在 60px 下折 2 行');
+  // 宽字符宽度不等于窄字符 2 倍时不能按列算（回归：Cascadia Mono 7.617 / 14）
+  eq(W.rows('中'.repeat(33), 33 * 14, 7.6171875, 14, 30.46875), 1, '换行：宽字符宽度独立测量');
+  eq(W.rows('中'.repeat(34), 33 * 14, 7.6171875, 14, 30.46875), 2, '换行：第 34 个汉字折行');
+
+  // locate：光标所在的视觉行与行内偏移
+  eq(W.locate('hello world foobar', 0, 120, N, WD, TAB), { row: 0, x: 0 }, '换行定位：行首');
+  eq(W.locate('hello world foobar', 12, 120, N, WD, TAB), { row: 1, x: 0 }, '换行定位：折行后的行首');
+  eq(W.locate('中文中文', 3, 60, N, WD, TAB), { row: 1, x: 0 }, '换行定位：宽字符折行边界');
+  eq(W.locate('中文中文', 2, 60, N, WD, TAB), { row: 0, x: 40 }, '换行定位：宽字符行内偏移按真实宽度');
+
+  // 边界：可用宽度过小时不能死循环
+  ok(W.rows('abcdef', 1, N, WD, TAB) >= 1, '换行：可用宽度极小不死循环');
+  ok(W.rows('中文中文', 1, N, WD, TAB) >= 1, '换行：宽字符 + 极小宽度不死循环');
+  eq(W.rows('abc', 0, N, WD, TAB), 1, '换行：宽度为 0 时退化为 1 行');
+
+  // 性能：1 万行普通代码行应当很快
+  const t0 = Date.now();
+  let acc = 0;
+  for (let i = 0; i < 10000; i++) acc += W.rows('const value = compute(' + i + ');', 800, 7.6171875, 14, 30.46875);
+  const ms = Date.now() - t0;
+  eq(acc, 10000, '换行：1 万行短行均为 1 个视觉行');
+  ok(ms < 3000, '换行：1 万行计算耗时 ' + ms + 'ms');
 }
 
 console.log(`\n通过 ${pass} 项，失败 ${fail} 项`);

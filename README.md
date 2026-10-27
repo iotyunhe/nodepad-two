@@ -85,7 +85,11 @@ python test/verify-installer-zh.py "release/Notepad Two-1.1.2-x64.msi" \
                                    "release/Notepad Two-1.1.2-x64-Setup.exe"
 ```
 
-浏览器端到端测试：用 Chrome 打开 `test/browser.test.html`（93 项，含大文件编辑场景）。
+浏览器端到端测试：`node test/cdp-browser-test.js`（94 项，用 CDP 驱动 Chrome，
+含大文件编辑场景）。
+
+自动换行几何校验：`node test/cdp-wrap-check.js`（23 项，检查折行后高亮层 /
+行号槽 / 当前行底色三者与输入框严格对齐）。
 
 > 注意：Chrome 132+ 移除了旧版 headless， `--virtual-time-budget` 不再生效；
 > 页面里的耗时数字只作「没有挂死」的哨兵。权威性能数据看 `bench-largefile.js`。
@@ -97,6 +101,7 @@ python test/verify-installer-zh.py "release/Notepad Two-1.1.2-x64.msi" \
 | 多标签页 | 新建/关闭/拖拽排序/双击重命名/中键关闭/脏标记 |
 | 语法高亮 | 19 种语言：JS/TS/Python/HTML/XML/CSS/JSON/Markdown/C/C++/Java/C#/Go/Rust/SQL/Shell/YAML/INI/纯文本 |
 | 代码折叠 | 括号配对 + 缩进层级 + `region` 标记；按层级折叠；行号槽点击 |
+| 自动换行 | 长行按词边界折行（`Alt+Z` 或「编辑 → 自动换行」）；CJK/制表符按真实宽度排版 |
 | 自动补全 | 关键字/类型/内置 API（从高亮规则自动提取）+ 文档词 + 代码片段，支持插件扩展 |
 | 查找替换 | 正则、大小写、全词、选区内；`$1` 反向引用；全部替换可一次撤销 |
 | 宏录制回放 | 录制语义化命令，可命名/导出/导入，支持多轮回放，整段可撤销 |
@@ -144,6 +149,7 @@ python test/verify-installer-zh.py "release/Notepad Two-1.1.2-x64.msi" \
 | 复制 / 删除 / 上下移动当前行 | `Ctrl+D` / `Ctrl+Shift+K` / `Alt+↑↓` |
 | 切换行注释 | `Ctrl+/` |
 | 折叠 / 展开全部 | `Alt+0` / `Alt+Shift+0` |
+| 自动换行开关 | `Alt+Z` |
 | 开始停止录制宏 / 回放 | `Ctrl+Shift+R` / `Ctrl+Alt+P` |
 | 显示侧边栏 / 切换主题 | `Ctrl+B` / `Ctrl+Shift+D` |
 | 快捷键总览 | `F1` |

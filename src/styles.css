@@ -267,7 +267,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 .nt-ln.folded .ln-fold { opacity: 1; background: var(--fold-bg); }
 
 .nt-scroll { position: relative; flex: 1; overflow: hidden; min-width: 0; }
-.nt-hl, .nt-input {
+.nt-hl, .nt-input, .nt-probe {
   font-family: var(--nt-font) !important;
   font-size: var(--nt-font-size) !important;
   line-height: var(--nt-line-height) !important;
@@ -279,6 +279,11 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
   padding: var(--nt-pad-top) var(--nt-pad-left);
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0;
+}
+/* 隐藏探针：只用来量「一个字符到底多宽」，不参与布局 */
+.nt-probe {
+  position: absolute; top: -9999px; left: 0; padding: 0;
+  visibility: hidden; pointer-events: none; z-index: -1;
 }
 .nt-hl {
   position: absolute; top: 0; left: 0; pointer-events: none;
@@ -295,9 +300,26 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
   -webkit-text-fill-color: transparent;
   caret-color: var(--fg);
   overflow: auto;
+  /* 预留滚动条占位：宽度恒定，折行点才不会在出现/消失滚动条时跳动 */
+  scrollbar-gutter: stable;
 }
 .nt-input::selection { background: var(--selection); -webkit-text-fill-color: transparent; }
 .nt-input::placeholder { color: var(--fg-faint); -webkit-text-fill-color: var(--fg-faint); }
+
+/* ------------------------------------------------------- 自动换行（Alt+Z）
+ * 高亮层与 textarea 必须用完全相同的折行规则，否则两层的文字会错位。
+ * 行高改为自动（按折出的视觉行数撑开），行号槽的行号块由 JS 写入等价高度。 */
+.nt-editor.wrap-on .nt-hl,
+.nt-editor.wrap-on .nt-input {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+.nt-editor.wrap-on .nt-hl { width: 100%; min-width: 0; }
+.nt-editor.wrap-on .nt-hl .row { height: auto; min-height: var(--nt-line-height); }
+.nt-editor.wrap-on .nt-input { overflow-x: hidden; overflow-y: scroll; }
+.nt-editor.wrap-on .nt-ln { align-items: flex-start; padding-top: 0; }
+.nt-editor.wrap-on .nt-ln .ln-num { line-height: var(--nt-line-height); }
 
 .nt-curline {
   position: absolute; left: 0; right: 0; height: var(--nt-line-height);

@@ -164,6 +164,7 @@
         '| 转到行 | `Ctrl+G` |',
         '| 自动补全 | `Ctrl+Space` |',
         '| 折叠 / 展开全部 | `Alt+0` / `Alt+Shift+0` |',
+        '| 自动换行开关 | `Alt+Z` |',
         '| 开始 / 停止录制宏 | `Ctrl+Shift+R` |',
         '| 回放宏 | `Ctrl+Alt+P` |',
         '| 快捷键总览 | `F1` |',
@@ -211,7 +212,7 @@
     _loadSettings() {
       const def = {
         tabSize: 4, insertSpaces: true, autoIndent: true, autoClose: true,
-        wordWrap: false, showLineNumbers: true, highlightCurrentLine: true,
+        wordWrap: true, showLineNumbers: true, highlightCurrentLine: true,
         fontSize: 13, theme: 'light', macroDelay: 30, autoComplete: true,
         lightweightLines: 120000, lightweightBytes: 4 * 1024 * 1024,
         showSidebar: false, mdPreviewWidth: 0, mdAutoPreview: true
@@ -225,6 +226,13 @@
       if (!s.sidebarCollapsedOnce) {
         s.showSidebar = false;
         s.sidebarCollapsedOnce = true;
+        try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch (e) {}
+      }
+      // 一次性迁移（v1.1.5）：自动换行此前只是「死配置」，界面上没有任何开关，
+      // 所以老配置里的 false 并不代表用户的选择，这里统一打开一次。
+      if (!s.wordWrapMigrated) {
+        s.wordWrap = true;
+        s.wordWrapMigrated = true;
         try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch (e) {}
       }
       return s;
@@ -241,7 +249,11 @@
       const rail = document.getElementById('sidebarRail');
       if (railToggle) railToggle.textContent = this.settings.showSidebar ? '›' : '‹';
       if (rail) rail.title = (this.settings.showSidebar ? '收起' : '展开') + '侧边栏 (Ctrl+B)';
-      if (this.view) { this.view._measure(); this.view.render(true); }
+      if (this.view) {
+        this.view._measure();
+        this.view.setWordWrap(this.settings.wordWrap !== false);
+        this.view.render(true);
+      }
     }
 
     /* ============================================================ UI 构建 */
@@ -300,6 +312,10 @@
           { sep: true },
           mi('edit', '剪切', 'edit.cut'), mi('edit', '复制', 'edit.copy'), mi('edit', '粘贴', 'edit.paste'),
           mi('edit', '全选', 'edit.selectAll'),
+          { sep: true },
+          mi('edit', '自动换行', 'edit.toggleWordWrap', {
+            checked: () => this.settings.wordWrap !== false
+          }),
           { sep: true },
           mi('edit', '复制当前行', 'edit.duplicateLine'), mi('edit', '删除当前行', 'edit.deleteLine'),
           mi('edit', '上移当前行', 'edit.moveLineUp'), mi('edit', '下移当前行', 'edit.moveLineDown'),
@@ -676,12 +692,14 @@
         '<div class="sb" id="sbLen"></div>' +
         '<div class="sb sb-right" id="sbPlugins"></div>' +
         '<div class="sb clickable" id="sbMd" hidden title="点击切换 Markdown 阅读模式">编辑</div>' +
+        '<div class="sb clickable" id="sbWrap" title="点击开关自动换行 (Alt+Z)">自动换行</div>' +
         '<div class="sb clickable" id="sbMode" title="点击切换轻量模式">完整模式</div>' +
         '<div class="sb" id="sbEol">LF</div>' +
         '<div class="sb">UTF-8</div>' +
         '<div class="sb clickable" id="sbLang">纯文本</div>';
       sb.querySelector('#sbLang').addEventListener('click', () => this._openMenu(this.el.menubar.querySelector('[data-menu="lang"]')));
       sb.querySelector('#sbMode').addEventListener('click', () => this.exec('view.toggleLightweight'));
+      sb.querySelector('#sbWrap').addEventListener('click', () => this.exec('edit.toggleWordWrap'));
       sb.querySelector('#sbMd').addEventListener('click', () => this.exec('md.cycleMode'));
       this._sbPlugins = sb.querySelector('#sbPlugins');
       this._pluginStatusHost = document.createElement('div');
@@ -709,6 +727,16 @@
       sb.querySelector('#sbEol').textContent = doc.eol === '\r\n' ? 'CRLF' : doc.eol === '\r' ? 'CR' : 'LF';
       sb.querySelector('#sbLang').textContent = NT.languages.get(doc.language).name;
       sb.querySelector('#sbMode').textContent = this.view.lightweight ? '轻量模式' : '完整模式';
+
+      // 自动换行状态：常驻可见，避免用户找不到这个开关
+      const wrapEl = sb.querySelector('#sbWrap');
+      if (wrapEl) {
+        const on = this.settings.wordWrap !== false;
+        wrapEl.textContent = on ? '自动换行' : '不换行';
+        wrapEl.style.opacity = on ? '1' : '.55';
+        wrapEl.title = (on ? '自动换行已开启' : '自动换行已关闭') +
+          (this.view.lightweight ? '（轻量模式/超大文件下暂不生效）' : '') + ' · 点击或按 Alt+Z 切换';
+      }
 
       // Markdown 模式指示：只在 Markdown 文档上出现，点击循环 编辑 → 分栏 → 阅读
       const mdEl = sb.querySelector('#sbMd');
@@ -1562,6 +1590,17 @@
         run: () => view()._handleTab(false) });
       C({ id: 'edit.outdent', title: '减少缩进', category: '编辑',
         run: () => view()._handleTab(true) });
+
+      /* 自动换行：Notepad++ 的同类开关也在「编辑」菜单，快捷键同为 Alt+Z */
+      C({ id: 'edit.toggleWordWrap', title: '自动换行', keybinding: 'Alt+Z', category: '编辑',
+        run: () => {
+          this.settings.wordWrap = this.settings.wordWrap === false;
+          this.saveSettings();
+          this._applySettings();
+          const on = this.settings.wordWrap !== false;
+          this.toast(on ? '已开启自动换行' : '已关闭自动换行（长行需横向滚动）', 'ok');
+          this.refreshStatus();
+        } });
 
       C({ id: 'edit.gotoLine', title: '转到行…', keybinding: 'Ctrl+G', category: '编辑',
         run: async () => {

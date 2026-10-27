@@ -275,7 +275,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 .nt-ln.folded .ln-fold { opacity: 1; background: var(--fold-bg); }
 
 .nt-scroll { position: relative; flex: 1; overflow: hidden; min-width: 0; }
-.nt-hl, .nt-input {
+.nt-hl, .nt-input, .nt-probe {
   font-family: var(--nt-font) !important;
   font-size: var(--nt-font-size) !important;
   line-height: var(--nt-line-height) !important;
@@ -287,6 +287,11 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
   padding: var(--nt-pad-top) var(--nt-pad-left);
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0;
+}
+/* 隐藏探针：只用来量「一个字符到底多宽」，不参与布局 */
+.nt-probe {
+  position: absolute; top: -9999px; left: 0; padding: 0;
+  visibility: hidden; pointer-events: none; z-index: -1;
 }
 .nt-hl {
   position: absolute; top: 0; left: 0; pointer-events: none;
@@ -303,9 +308,26 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
   -webkit-text-fill-color: transparent;
   caret-color: var(--fg);
   overflow: auto;
+  /* 预留滚动条占位：宽度恒定，折行点才不会在出现/消失滚动条时跳动 */
+  scrollbar-gutter: stable;
 }
 .nt-input::selection { background: var(--selection); -webkit-text-fill-color: transparent; }
 .nt-input::placeholder { color: var(--fg-faint); -webkit-text-fill-color: var(--fg-faint); }
+
+/* ------------------------------------------------------- 自动换行（Alt+Z）
+ * 高亮层与 textarea 必须用完全相同的折行规则，否则两层的文字会错位。
+ * 行高改为自动（按折出的视觉行数撑开），行号槽的行号块由 JS 写入等价高度。 */
+.nt-editor.wrap-on .nt-hl,
+.nt-editor.wrap-on .nt-input {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+.nt-editor.wrap-on .nt-hl { width: 100%; min-width: 0; }
+.nt-editor.wrap-on .nt-hl .row { height: auto; min-height: var(--nt-line-height); }
+.nt-editor.wrap-on .nt-input { overflow-x: hidden; overflow-y: scroll; }
+.nt-editor.wrap-on .nt-ln { align-items: flex-start; padding-top: 0; }
+.nt-editor.wrap-on .nt-ln .ln-num { line-height: var(--nt-line-height); }
 
 .nt-curline {
   position: absolute; left: 0; right: 0; height: var(--nt-line-height);
@@ -552,7 +574,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 .bigfile-banner .btn { padding: 3px 10px; background: rgba(255,255,255,.9); border-color: transparent; color: #333; }
 
 </style>
-<script>window.__NT_CHANGELOG__ = "# 更新日志\n\n本项目的版本号遵循 `主版本.次版本.补丁`：\n\n- 修复缺陷 / 文案与配置调整 → 补丁位 +1\n- 新增向后兼容的功能 → 次版本 +1，补丁位归零\n- 不兼容的改动 → 主版本 +1，其余归零\n\n每次发版都会打同名 git 标签（`v1.1.1` 等），`git tag -l` 可查。\n\n---\n\n## [1.1.4] — 2026-10-19\n\n### 新增\n- `scripts/publish-release.js`：一条命令把 `release/` 里的安装包发布到 GitHub Releases。\n  自动识别仓库与版本、从本文件抽取对应版本的说明作为 Release 正文，\n  支持 `--dry-run`（只看流程）与 `--draft`（先存草稿）。\n  因为 Release 走 REST API，**必须用 Personal Access Token**，\n  git 使用的 SSH 密钥对 API 无效。\n\n### 变更\n- `desktop/package.json` 增加 `npm run publish:release` 快捷方式。\n\n---\n\n## [1.1.3] — 2026-10-19\n\n### 新增\n- 新增 [LICENSE](LICENSE)（MIT）与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)：\n  列明随安装包分发的 Electron / Chromium / Node.js / V8 / FFmpeg / ICU / ANGLE，\n  以及构建期使用的 electron-builder / NSIS / WiX / 7-Zip 的版本、许可证与项目地址。\n- 程序内新增 **帮助 → 开源许可**，构建时把上述声明注入产物后渲染展示。\n\n### 变更\n- README 补充仓库地址、克隆命令与「开源声明」章节；安装包文件名统一到当前版本。\n\n---\n\n## [1.1.2] — 2026-10-19\n\n### 新增\n- 新增本文件 `CHANGELOG.md`，补齐 1.0.0 以来的全部版本记录。\n- 程序内新增 **帮助 → 更新日志**，弹层直接渲染本文件内容。\n  构建时由 `build.py` 把 `CHANGELOG.md` 注入产物，仓库文档与界面永远是同一份数据，不会出现两边不一致。\n\n### 变更\n- README 的「当前版本」改为跟踪最新版本，并链接到本文件。\n\n---\n\n## [1.1.1] — 2026-10-19\n\n### 变更\n- 右侧插件/宏/统计面板**默认收起**，只保留一条 22px 的竖向把手（竖排「面板」字样 + 箭头）。\n- 点击把手或按 `Ctrl+B` 可平滑展开/收起（160ms 宽度过渡），收起后完全不占编辑区宽度。\n- 老配置做一次性迁移：升级后原来的「展开」状态会被收起来一次，之后手动展开的选择正常记住。\n\n### 修复\n- 收起态残留 1px 分隔线导致布局轻微偏移。\n\n---\n\n## [1.1.0] — 2026-10-19\n\n### 新增\n- **打开 `.md` 自动进入分栏预览**：左源码、右渲染，分隔条可拖动调宽度。\n- 设置项 `mdAutoPreview`（默认开启），菜单入口「视图 → 打开 Markdown 时自动分栏」。\n- 超过 2 MB 或处于轻量模式的 Markdown 文件不自动渲染，避免卡顿。\n- 每个标签页各自记住视图状态（编辑 / 分栏 / 阅读），手动切回编辑不会被覆盖。\n\n### 修复\n- `bump-version.js` 中输出目录同步正则括号错位导致脚本语法错误。\n- 升级版本号时构建输出目录不同步（仍指向旧版本目录）。\n\n### 文档\n- README 新增「Markdown 文档」章节：三种视图、格式快捷键、支持的语法、安全说明。\n\n---\n\n## [1.0.2] — 2026-10-19\n\n### 修复\n- **复制粘贴不可用**：`desktop/main.js` 的权限处理器对所有请求一律拒绝，连带拦截了剪贴板 API。\n  现改为仅放行 `clipboard-read` / `clipboard-write` / `clipboard-sanitized-write`，\n  摄像头、麦克风、通知、定位等仍拒绝。\n- 复制/粘贴失败的提示文案去掉了误导性的「请授权剪贴板权限」。\n\n---\n\n## [1.0.1] — 2026-10-16\n\n### 修复\n- **MSI 在 per-user 安装模式下无法自选安装路径**：安装范围页的「下一步」直接跳到\n  「准备安装」，跳过了目录选择页。修正模板中两条互斥 `ControlEvent` 的目标，\n  并让目录页的「上一步」回到安装范围页。\n\n### 新增\n- `bump-version.js`：一条命令同步 `desktop/package.json` 与 `src/00-core.js` 的版本号，\n  支持 `patch|minor|major|X.Y.Z` 与 `--check` 校验。\n- `build.py` 构建时从 `package.json` 注入 `NT.version`，交付产物的版本号不再依赖手工同步。\n\n### 变更\n- 构建输出改到工作区外的 `../../notepad-two-dist/<version>`，仓库不再堆积构建产物。\n- 工作区产物整理：只保留 `release/` 一个交付目录。\n\n### 测试\n- 新增 MSI 目录页链路断言（`verify-installer-zh.py` 19 → 23 项）。\n- 新增版本号一致性断言（`core.test.js` 87 → 89 项）。\n\n---\n\n## [1.0.0] — 2026-10-15\n\n### 首个版本\n\n- **编辑内核**：行数组缓冲 + 惰性偏移索引、透明 textarea + 高亮覆盖层、可见行虚拟化。\n- **多标签页**：新建 / 关闭 / 拖拽排序 / 双击重命名 / 中键关闭 / 脏标记。\n- **语法高亮**：19 种语言（JS/TS/Python/HTML/XML/CSS/JSON/Markdown/C/C++/Java/C#/Go/Rust/SQL/Shell/YAML/INI/纯文本）。\n- **代码折叠**：括号配对 + 缩进层级 + `region` 标记，支持按层级折叠。\n- **自动补全**：关键字 / 类型 / 内置 API / 文档词 / 代码片段，支持插件扩展。\n- **查找替换**：正则、大小写、全词、选区内、`$1` 反向引用、全部替换可一次撤销。\n- **宏录制回放**：录制语义化命令，可命名 / 导出 / 导入，整段可撤销。\n- **插件机制**：9 个扩展点 + 生命周期管理 + 源码热加载，内置 5 个插件。\n- **大文件**：分片流式读取、三档性能自适应降级、虚拟化渲染。\n- **Markdown**：自研纯函数渲染器（零依赖、默认不透传原始 HTML），分栏 / 阅读 / 导出 HTML。\n- **中文化交付**：NSIS 与 MSI 安装向导全中文，程序默认语言 `zh-CN`。\n";</script>
+<script>window.__NT_CHANGELOG__ = "# 更新日志\n\n本项目的版本号遵循 `主版本.次版本.补丁`：\n\n- 修复缺陷 / 文案与配置调整 → 补丁位 +1\n- 新增向后兼容的功能 → 次版本 +1，补丁位归零\n- 不兼容的改动 → 主版本 +1，其余归零\n\n每次发版都会打同名 git 标签（`v1.1.1` 等），`git tag -l` 可查。\n\n---\n\n## [1.2.0] — 2026-10-27\n\n### 新增\n- **自动换行（soft wrap）**。此前 `wordWrap` 只是一个没有界面入口的死配置项，\n  粘贴长行只能横向滚动，编辑菜单里也找不到开关 —— 这个能力确实是缺的，不是藏得深。\n  - 编辑菜单新增 **自动换行**，快捷键 `Alt+Z`（与 Notepad++ 一致），带勾选状态。\n  - 状态栏常驻一个可点击的「自动换行 / 不换行」指示，不必再翻菜单。\n  - 默认开启；老配置里那个从未生效过的 `false` 通过一次性迁移统一打开。\n  - 长行按词边界折行，行尾空白悬挂；超长无空格串按字符硬切；制表符按 tab-stop 展开；\n    CJK / 全角字符按真实宽度参与排版。\n  - 折行后行号只标在首行，行号块高度随折行数增长，当前行底色也覆盖整个折行块。\n- 新增 `src/38-wrap.js`：纯函数折行排版计算，无 DOM 依赖，可在 Node 里直接单测。\n- 新增 `test/cdp-wrap-check.js`：用 CDP 驱动真实 Chrome 校验折行的几何对齐（23 项）。\n- 新增 `test/cdp-browser-test.js`：用 CDP 跑 `test/browser.test.html`（Chrome 132+\n  已移除 `--virtual-time-budget`，无头跑法只能走这条路）。\n- 新增 `test/diag-edit-perf.js`：拆分统计超大文件上一次编辑各环节的耗时。\n\n### 修复\n- 折行位置的计算精度：最初按「一行能放多少个等宽字符」推算，实测发现等宽字体里\n  CJK 的步进并不等于窄字符的两倍（Cascadia Mono 13px：7.617px / 14px），\n  按列算会系统性高估宽字符宽度、多算一行，导致高亮层与输入框错位。\n  改为**像素模型**，宽度由隐藏探针从 DOM 实测；渲染后再读一次真实行高做校正兜底。\n- 单字符宽度改用 DOM 实测而非 `canvas.measureText`，两者有零点几像素的差异，\n  累到几十列之后足以让折行点算错。\n\n### 性能\n- 不换行时**完全不建折行索引**（位置纯算术得出）。初版在非换行模式下也维护了\n  一张「行 → 顶部 Y」表，百万行文件每敲一个键重建一次，实测让编辑退化了两个数量级。\n\n### 已知限制\n- 超大文件（默认 > 12 万行或 > 4 MB）会进入轻量模式，自动换行随之关闭 ——\n  逐行排版在那个体量上会明显拖慢滚动。\n- 「透明 textarea 叠加」架构下，超大文件上的**命令式编辑**（撤销、宏、批量替换等）\n  要把光标同步回 37 MB 的 textarea，Chrome 的 `setSelectionRange` 在这个体量上是\n  O(value 长度)，单次可达十几秒。普通打字走 `input` 事件、由浏览器自己维护选区，\n  不受影响。这是既有问题，与本次改动无关，详见 `test/diag-edit-perf.js`。\n\n---\n\n## [1.1.4] — 2026-10-19\n\n### 新增\n- `scripts/publish-release.js`：一条命令把 `release/` 里的安装包发布到 GitHub Releases。\n  自动识别仓库与版本、从本文件抽取对应版本的说明作为 Release 正文，\n  支持 `--dry-run`（只看流程）与 `--draft`（先存草稿）。\n  因为 Release 走 REST API，**必须用 Personal Access Token**，\n  git 使用的 SSH 密钥对 API 无效。\n\n### 变更\n- `desktop/package.json` 增加 `npm run publish:release` 快捷方式。\n\n---\n\n## [1.1.3] — 2026-10-19\n\n### 新增\n- 新增 [LICENSE](LICENSE)（MIT）与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)：\n  列明随安装包分发的 Electron / Chromium / Node.js / V8 / FFmpeg / ICU / ANGLE，\n  以及构建期使用的 electron-builder / NSIS / WiX / 7-Zip 的版本、许可证与项目地址。\n- 程序内新增 **帮助 → 开源许可**，构建时把上述声明注入产物后渲染展示。\n\n### 变更\n- README 补充仓库地址、克隆命令与「开源声明」章节；安装包文件名统一到当前版本。\n\n---\n\n## [1.1.2] — 2026-10-19\n\n### 新增\n- 新增本文件 `CHANGELOG.md`，补齐 1.0.0 以来的全部版本记录。\n- 程序内新增 **帮助 → 更新日志**，弹层直接渲染本文件内容。\n  构建时由 `build.py` 把 `CHANGELOG.md` 注入产物，仓库文档与界面永远是同一份数据，不会出现两边不一致。\n\n### 变更\n- README 的「当前版本」改为跟踪最新版本，并链接到本文件。\n\n---\n\n## [1.1.1] — 2026-10-19\n\n### 变更\n- 右侧插件/宏/统计面板**默认收起**，只保留一条 22px 的竖向把手（竖排「面板」字样 + 箭头）。\n- 点击把手或按 `Ctrl+B` 可平滑展开/收起（160ms 宽度过渡），收起后完全不占编辑区宽度。\n- 老配置做一次性迁移：升级后原来的「展开」状态会被收起来一次，之后手动展开的选择正常记住。\n\n### 修复\n- 收起态残留 1px 分隔线导致布局轻微偏移。\n\n---\n\n## [1.1.0] — 2026-10-19\n\n### 新增\n- **打开 `.md` 自动进入分栏预览**：左源码、右渲染，分隔条可拖动调宽度。\n- 设置项 `mdAutoPreview`（默认开启），菜单入口「视图 → 打开 Markdown 时自动分栏」。\n- 超过 2 MB 或处于轻量模式的 Markdown 文件不自动渲染，避免卡顿。\n- 每个标签页各自记住视图状态（编辑 / 分栏 / 阅读），手动切回编辑不会被覆盖。\n\n### 修复\n- `bump-version.js` 中输出目录同步正则括号错位导致脚本语法错误。\n- 升级版本号时构建输出目录不同步（仍指向旧版本目录）。\n\n### 文档\n- README 新增「Markdown 文档」章节：三种视图、格式快捷键、支持的语法、安全说明。\n\n---\n\n## [1.0.2] — 2026-10-19\n\n### 修复\n- **复制粘贴不可用**：`desktop/main.js` 的权限处理器对所有请求一律拒绝，连带拦截了剪贴板 API。\n  现改为仅放行 `clipboard-read` / `clipboard-write` / `clipboard-sanitized-write`，\n  摄像头、麦克风、通知、定位等仍拒绝。\n- 复制/粘贴失败的提示文案去掉了误导性的「请授权剪贴板权限」。\n\n---\n\n## [1.0.1] — 2026-10-16\n\n### 修复\n- **MSI 在 per-user 安装模式下无法自选安装路径**：安装范围页的「下一步」直接跳到\n  「准备安装」，跳过了目录选择页。修正模板中两条互斥 `ControlEvent` 的目标，\n  并让目录页的「上一步」回到安装范围页。\n\n### 新增\n- `bump-version.js`：一条命令同步 `desktop/package.json` 与 `src/00-core.js` 的版本号，\n  支持 `patch|minor|major|X.Y.Z` 与 `--check` 校验。\n- `build.py` 构建时从 `package.json` 注入 `NT.version`，交付产物的版本号不再依赖手工同步。\n\n### 变更\n- 构建输出改到工作区外的 `../../notepad-two-dist/<version>`，仓库不再堆积构建产物。\n- 工作区产物整理：只保留 `release/` 一个交付目录。\n\n### 测试\n- 新增 MSI 目录页链路断言（`verify-installer-zh.py` 19 → 23 项）。\n- 新增版本号一致性断言（`core.test.js` 87 → 89 项）。\n\n---\n\n## [1.0.0] — 2026-10-15\n\n### 首个版本\n\n- **编辑内核**：行数组缓冲 + 惰性偏移索引、透明 textarea + 高亮覆盖层、可见行虚拟化。\n- **多标签页**：新建 / 关闭 / 拖拽排序 / 双击重命名 / 中键关闭 / 脏标记。\n- **语法高亮**：19 种语言（JS/TS/Python/HTML/XML/CSS/JSON/Markdown/C/C++/Java/C#/Go/Rust/SQL/Shell/YAML/INI/纯文本）。\n- **代码折叠**：括号配对 + 缩进层级 + `region` 标记，支持按层级折叠。\n- **自动补全**：关键字 / 类型 / 内置 API / 文档词 / 代码片段，支持插件扩展。\n- **查找替换**：正则、大小写、全词、选区内、`$1` 反向引用、全部替换可一次撤销。\n- **宏录制回放**：录制语义化命令，可命名 / 导出 / 导入，整段可撤销。\n- **插件机制**：9 个扩展点 + 生命周期管理 + 源码热加载，内置 5 个插件。\n- **大文件**：分片流式读取、三档性能自适应降级、虚拟化渲染。\n- **Markdown**：自研纯函数渲染器（零依赖、默认不透传原始 HTML），分栏 / 阅读 / 导出 HTML。\n- **中文化交付**：NSIS 与 MSI 安装向导全中文，程序默认语言 `zh-CN`。\n";</script>
 <script>window.__NT_NOTICES__ = "# 第三方组件与开源声明\n\nNotepad Two 的**应用源代码**（`src/`、`desktop/main.js`、`desktop/preload.js`、\n`build.py`、`test/` 等）由本项目原创，以 [MIT 许可证](LICENSE) 发布。\n\n下面是本项目**使用或随安装包分发**的第三方组件。它们各自遵循自己的许可证，\n本项目不对其主张任何权利。\n\n---\n\n## 一、随安装包分发的运行时组件\n\n安装后的程序目录（`win-unpacked/`）本质上是一个 Electron 应用，\n其中绝大部分二进制文件来自 Electron 及其内置的 Chromium / Node.js。\n\n| 组件 | 版本 | 许可证 | 项目地址 |\n| --- | --- | --- | --- |\n| Electron | 38.8.6 | MIT | https://github.com/electron/electron |\n| Chromium | 140.0.7339.249 | BSD 3-Clause（另含众多第三方许可，见其 `LICENSE` 文件） | https://www.chromium.org/ |\n| Node.js | 随 Electron 内置 | MIT | https://nodejs.org/ |\n| V8 | 随 Chromium 内置 | BSD 3-Clause | https://v8.dev/ |\n| ICU（`icudtl.dat`） | 随 Chromium 内置 | Unicode / ICU License | https://icu.unicode.org/ |\n| ANGLE（`libEGL.dll` / `libGLESv2.dll`） | 随 Chromium 内置 | BSD 3-Clause | https://chromium.googlesource.com/angle/angle |\n| FFmpeg（`ffmpeg.dll`） | Electron 官方构建 | LGPL 2.1 | https://ffmpeg.org/ |\n| zlib / libpng / 其他 Chromium 依赖 | 随 Chromium 内置 | 各自许可（zlib、libpng 等） | https://chromium.googlesource.com/chromium/src/+/main/third_party |\n| DirectX Shader Compiler（`dxcompiler.dll` / `dxil.dll`） | 随 Chromium 内置 | MIT | https://github.com/microsoft/DirectXShaderCompiler |\n\n> Electron 的完整第三方许可清单可查阅其发行包内的 `LICENSE` 与\n> `LICENSES.chromium.html`。安装后位于程序目录下（若发行包未附带该文件，\n> 可在 https://github.com/electron/electron/blob/main/LICENSE 查看）。\n\n## 二、构建期使用、不随程序安装的工具\n\n这些工具只在打包阶段运行，产物中不包含它们的可执行文件\n（NSIS 生成的安装器存根除外，见下）。\n\n| 工具 | 版本 | 许可证 | 用途 |\n| --- | --- | --- | --- |\n| electron-builder | 26.15.3 | MIT | 生成 NSIS / MSI 安装包 |\n| NSIS | 3.x（由 electron-builder 内置） | zlib/libpng License | `Setup.exe` 安装器（存根代码随安装器分发） |\n| WiX Toolset | 4.0.0.5512.2 | MS-RL | 生成 `.msi` 安装包 |\n| 7-Zip | 由 electron-builder 内置 | LGPL 2.1（含 unRAR 限制条款） | 解压 Electron 发行包 |\n| app-builder-bin | 随 electron-builder | MIT | 打包辅助程序 |\n\nNSIS 许可证：https://nsis.sourceforge.io/License\nWiX Toolset 许可证：https://wixtoolset.org/about/license/\n\n## 三、明确没有使用的项目\n\n为了避免误解，这里说明几个「看起来可能用了、实际没有」的情况：\n\n- **没有引入任何前端框架**（React / Vue / Svelte 等），界面全部由原生 DOM 构建。\n- **没有引入编辑器组件**（CodeMirror / Monaco / Ace），编辑器内核（行缓冲、\n  分词高亮、折叠、补全、虚拟化渲染）为自行实现。\n- **没有引入 Markdown 库**（marked / markdown-it / remark），\n  `src/45-markdown.js` 是自研的纯函数渲染器，且默认不透传原始 HTML。\n- **没有引入语法高亮库**（highlight.js / Prism），`src/20-languages.js`\n  中的规则表为自行编写。\n- **运行时没有任何 npm 依赖**：`desktop/package.json` 的 `dependencies` 为空，\n  `electron` 与 `electron-builder` 仅作为开发依赖存在。\n\n## 四、对 electron-builder 模板的修改\n\n`desktop/patch-builder-templates.js` 会在 `postinstall` 阶段修改\n`node_modules/app-builder-lib/templates/` 下的 NSIS 消息表与 MSI 模板 XML，\n目的是让安装向导显示简体中文、并修复 per-user 安装跳过目录选择页的问题。\n\n这些模板文件仍属 electron-builder 项目（MIT），本项目仅在使用侧做本地修改，\n不重新分发其源码。\n\n---\n\n如果你认为本项目遗漏了某个应当署名的组件，欢迎提 issue 指出。\n";</script>
 </head>
 <body>
@@ -600,7 +622,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
    *   · 改版本请用 `node bump-version.js patch|minor|major|X.Y.Z`（会同时改这里）；
    *   · build.py 打包时还会用 package.json 覆盖此字面量，确保交付产物一定正确；
    *   · core.test.js 有一条断言校验此处与 package.json 一致，漂移会被测出来。*/
-  NT.version = '1.1.4';
+  NT.version = '1.2.0';
 
   /* ------------------------------------------------------------------ 事件总线
    * 全局单例。约定的事件名（节选）：
@@ -2106,6 +2128,164 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 
 </script>
 <script>
+/* ==== src/38-wrap.js ==== */
+/* ============================================================================
+ * 38-wrap.js — 自动换行（soft wrap）的排版计算
+ *
+ * 只做纯计算，不碰 DOM，因此可以在 Node 里直接单元测试（test/core.test.js）。
+ *
+ * 【为什么要自己算】
+ * 编辑器采用「透明 textarea + 高亮层叠加」结构，高亮层为了性能只渲染可见行，
+ * 用 translateY 把它对齐到滚动位置。一旦开启换行，每一行占据的高度不再是
+ * 固定的 1 个行高，而是「视觉行数 × 行高」。要在只渲染可见行的情况下把
+ * 高亮层放到正确位置，就必须知道每一行折成了几个视觉行 —— 也就是这里做的事。
+ *
+ * 【为什么用像素而不是「列」】
+ * 最初的实现按「一行能放多少个等宽字符」来算。实测发现等宽字体里 CJK 的
+ * 实际步进并不等于窄字符的两倍（Cascadia Mono 13px：窄字符 7.617px，
+ * 汉字 14px），按列算会系统性高估宽字符宽度，导致折行数多算一行、高亮层与
+ * 输入框错位。所以这里统一用「像素宽度」做单位，宽度由调用方实测传入。
+ *
+ * 【断行规则】
+ * 与 CSS `white-space: pre-wrap` + `overflow-wrap: break-word` 的行为对齐：
+ *   · 优先在空白字符（空格 / 制表符）之后断开，行尾空白悬挂、不计入下一行；
+ *   · 单个"词"比整行还宽时，按字符硬切（对应 break-word）；
+ *   · 制表符按 tab-stop 展开（位置依赖当前 x，和浏览器一致）；
+ *   · 东亚宽字符（CJK、全角、emoji）用单独的宽度。
+ *
+ * 即便如此，浏览器的断行还受字体回退、字距微调等影响，算出来的值只能算
+ * 「高精度预测」。40-view.js 会在渲染后读真实行高做一次校正，把误差归零。
+ * ========================================================================== */
+(function (global) {
+  'use strict';
+  const NT = global.NT || (global.NT = {});
+
+  /** 东亚宽字符（W / F 宽度类）判定 */
+  function isWide(code) {
+    if (code < 0x1100) return false;
+    return (
+      (code <= 0x115F) ||                       // 1100-115F 谚文字母
+      (code >= 0x2E80 && code <= 0x303E) ||     // 部首扩展、康熙部首、CJK 符号
+      (code >= 0x3041 && code <= 0x33FF) ||     // 假名 … CJK 兼容
+      (code >= 0x3400 && code <= 0x4DBF) ||     // CJK 扩展 A
+      (code >= 0x4E00 && code <= 0x9FFF) ||     // CJK 基本区
+      (code >= 0xA000 && code <= 0xA4CF) ||     // 彝文
+      (code >= 0xAC00 && code <= 0xD7A3) ||     // 谚文音节
+      (code >= 0xF900 && code <= 0xFAFF) ||     // CJK 兼容汉字
+      (code >= 0xFE10 && code <= 0xFE19) ||     // 竖排标点
+      (code >= 0xFE30 && code <= 0xFE6F) ||     // CJK 兼容形式
+      (code >= 0xFF00 && code <= 0xFF60) ||     // 全角形式
+      (code >= 0xFFE0 && code <= 0xFFE6) ||     // 全角符号
+      (code >= 0x1F300 && code <= 0x1F9FF) ||   // emoji
+      (code >= 0x20000 && code <= 0x3FFFD)      // CJK 扩展 B 及以后
+    );
+  }
+
+  function hasWide(text) {
+    for (let i = 0; i < text.length; i++) {
+      if (isWide(text.charCodeAt(i))) return true;
+    }
+    return false;
+  }
+
+  /**
+   * 单个字符在给定位置 x 上占的像素宽度。
+   * @param {number} x     当前行已占用的像素
+   * @param {number} narrow 窄字符宽度（等宽字体的基本步进）
+   * @param {number} wide   宽字符宽度（CJK / 全角）
+   * @param {number} tab    制表位宽度（= tabSize × narrow）
+   */
+  function charW(code, x, narrow, wide, tab) {
+    if (code === 9) {
+      const r = x % tab;
+      return r === 0 ? tab : tab - r;
+    }
+    return isWide(code) ? wide : narrow;
+  }
+
+  /**
+   * 计算一行文本折成几个视觉行，以及每个视觉行的起始字符下标。
+   * @param {string} text
+   * @param {number} avail  可用宽度（像素）
+   * @param {number} narrow 窄字符宽度
+   * @param {number} wide   宽字符宽度
+   * @param {number} tab    制表位宽度
+   * @returns {{rows:number, starts:number[]}} starts[0] 恒为 0
+   */
+  function measure(text, avail, narrow, wide, tab) {
+    const n = text ? text.length : 0;
+    const starts = [0];
+    if (n === 0 || !(avail > 0) || !(narrow > 0)) return { rows: 1, starts };
+
+    /* 快路径：绝大多数代码行走这里 */
+    if (text.indexOf('\t') < 0) {
+      if (n * wide <= avail) return { rows: 1, starts };                 // 全按宽字符算也放得下
+      if (n * narrow <= avail && !hasWide(text)) return { rows: 1, starts }; // 纯窄字符
+    }
+
+    let rowStart = 0;
+    while (rowStart < n) {
+      let used = 0;
+      let lastSpace = -1;      // 本行内最后一个空白字符下标（可作为断点）
+      let i = rowStart;
+      let overflow = false;
+      for (; i < n; i++) {
+        const code = text.charCodeAt(i);
+        const w = charW(code, used, narrow, wide, tab);
+        if (used + w > avail && used > 0) { overflow = true; break; }
+        used += w;
+        if (code === 32 || code === 9) lastSpace = i;
+      }
+      if (!overflow) break;    // 剩余内容一行放得下
+
+      // 行尾空白悬挂：断点取「最后一个空白之后」，那段空白不计入下一行
+      let next = (lastSpace >= rowStart) ? lastSpace + 1 : i;
+      if (next <= rowStart) next = rowStart + 1;   // 保证前进，杜绝死循环
+      starts.push(next);
+      rowStart = next;
+    }
+    return { rows: starts.length, starts };
+  }
+
+  /** 只要视觉行数时的轻量入口 */
+  function rows(text, avail, narrow, wide, tab) {
+    const n = text ? text.length : 0;
+    if (n === 0 || !(avail > 0) || !(narrow > 0)) return 1;
+    if (text.indexOf('\t') < 0) {
+      if (n * wide <= avail) return 1;
+      if (n * narrow <= avail && !hasWide(text)) return 1;
+    }
+    return measure(text, avail, narrow, wide, tab).rows;
+  }
+
+  /**
+   * 定位某一列在折行后的视觉位置（光标 / 补全弹窗定位用）。
+   * @returns {{row:number, x:number}} row = 视觉行序号（从 0 开始），x = 行内像素偏移
+   */
+  function locate(text, col, avail, narrow, wide, tab) {
+    const n = text ? text.length : 0;
+    if (n === 0 || !(avail > 0) || !(narrow > 0)) return { row: 0, x: col * narrow };
+    const c = Math.max(0, Math.min(col, n));
+    const m = measure(text, avail, narrow, wide, tab);
+    let row = 0;
+    for (let k = m.starts.length - 1; k >= 0; k--) {
+      if (m.starts[k] <= c) { row = k; break; }
+    }
+    const from = m.starts[row];
+    let x = 0;
+    for (let i = from; i < c; i++) {
+      x += charW(text.charCodeAt(i), x, narrow, wide, tab);
+    }
+    return { row, x };
+  }
+
+  NT.wrap = { isWide, charW, measure, rows, locate };
+
+  if (typeof module !== 'undefined' && module.exports) module.exports = NT;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
 /* ==== src/40-view.js ==== */
 /* ============================================================================
  * 40-view.js — 编辑器视图层（View / 渲染引擎）
@@ -2132,6 +2312,15 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
  *   · 渲染只处理可见行 ± OVERSCAN，行号槽与高亮层同样只渲染可见部分；
  *   · 分词结果按行缓存，并维护「行首词法状态」前缀链，编辑后只失效受影响的后缀；
  *   · 超过阈值自动进入轻量模式（关闭分词/折叠/文档词补全）。
+ *
+ * 【自动换行（soft wrap）】
+ * 换行只改「显示」不改「文本」：textarea 用 wrap="soft"，高亮层用等价的
+ * pre-wrap + break-word，两层靠同一套字体与宽度自然折行。
+ * 难点在于虚拟化 —— 一旦折行，每行占的高度不再恒定，只渲染可见行就必须知道
+ * 每一行折了几个视觉行。为此维护 rowTop（行 → 顶部 Y）与 wrapRows（行 → 视觉行数）：
+ *   · 视觉行数由 38-wrap.js 按像素宽度解析计算；
+ *   · 渲染后读一次真实行高做校正，误差归零（wrapOverride）；
+ *   · 未开启换行时这两个数组完全不建，位置纯算术得出，避免大文件退化。
  * ========================================================================== */
 (function (global) {
   'use strict';
@@ -2168,9 +2357,26 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       this.composing = false;
       this.ac = null;               // 补全控制器（由 50-completion.js 装配）
 
-      this.metrics = { lh: 20, cw: 8, padTop: 8, padLeft: 14, digits: 3 };
+      this.metrics = { lh: 20, cw: 8, cwWide: 16, padTop: 8, padLeft: 14, padRight: 14, digits: 3 };
       this._rafPending = false;
       this._lastRender = { first: -1, last: -1, version: -1 };
+
+      /* --- 自动换行状态 ---
+       * wrap        : 用户开关
+       * wrapWidth   : 当前宽度下一行可用的像素宽度
+       * wrapRows[v] : 视图行 v 折成几个视觉行（未换行时恒为 1）
+       * rowTop[v]   : 视图行 v 的顶部 Y（相对内容起点，不含 padTop），长度 = 行数+1
+       * 这两个数组是换行模式下「虚拟化」的关键：有了它才能只渲染可见行，
+       * 同时把高亮层 / 行号槽 / 当前行底色精确对齐到滚动位置。 */
+      this.wrap = false;
+      this.wrapWidth = 0;
+      this.wrapRows = [];
+      this.rowTop = [];
+      this.wrapOverride = new Map();   // 视图行 -> 实测视觉行数（DOM 校正结果）
+      this._wrapDirtyFrom = Infinity;
+      this._wrapScrollW = -1;
+      this._wrapMeasureDirty = true;
+      this._wrapFixRounds = 0;
 
       this._buildDom();
       this._bindEvents();
@@ -2185,6 +2391,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         '<div class="nt-gutter"><div class="nt-gutter-inner"></div></div>' +
         '<div class="nt-scroll">' +
           '<div class="nt-curline"></div>' +
+          '<span class="nt-probe" aria-hidden="true"></span>' +
           '<pre class="nt-hl"><code></code></pre>' +
           '<textarea class="nt-input" spellcheck="false" autocomplete="off" ' +
             'autocorrect="off" autocapitalize="off" wrap="off"></textarea>' +
@@ -2194,6 +2401,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       this.gutterInner = wrap.querySelector('.nt-gutter-inner');
       this.scroll = wrap.querySelector('.nt-scroll');
       this.curLine = wrap.querySelector('.nt-curline');
+      this.probe = wrap.querySelector('.nt-probe');
       this.hl = wrap.querySelector('.nt-hl');
       this.hlCode = wrap.querySelector('.nt-hl code');
       this.input = wrap.querySelector('.nt-input');
@@ -2202,15 +2410,32 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 
     _measure() {
       const cs = getComputedStyle(this.input);
-      const font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-      const ctx = EditorView._measureCtx ||
-        (EditorView._measureCtx = document.createElement('canvas').getContext('2d'));
-      ctx.font = font;
-      const w = ctx.measureText('MMMMMMMMMMMMMMMMMMMM').width / 20;
-      this.metrics.cw = w > 0 ? w : 8;
+      // 单字符宽度必须用真实排版来量：canvas.measureText 与 DOM 的实际步进
+      // 会差零点几个像素，累到几十列之后就会让折行点算错，表现为高亮层与
+      // 输入框的文字错位。这里用一个隐藏探针直接读 DOM 宽度。
+      let cw = 0, cwWide = 0;
+      if (this.probe) {
+        this.probe.textContent = 'M'.repeat(64);
+        cw = this.probe.getBoundingClientRect().width / 64;
+        this.probe.textContent = '中'.repeat(32);
+        cwWide = this.probe.getBoundingClientRect().width / 32;
+      }
+      if (!(cw > 0)) {
+        const font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+        const ctx = EditorView._measureCtx ||
+          (EditorView._measureCtx = document.createElement('canvas').getContext('2d'));
+        ctx.font = font;
+        cw = ctx.measureText('MMMMMMMMMMMMMMMMMMMM').width / 20;
+      }
+      this.metrics.cw = cw > 0 ? cw : 8;
+      this.metrics.cwWide = cwWide > 0 ? cwWide : this.metrics.cw * 2;
       this.metrics.lh = parseFloat(cs.lineHeight) || 20;
       this.metrics.padTop = parseFloat(cs.paddingTop) || 8;
       this.metrics.padLeft = parseFloat(cs.paddingLeft) || 14;
+      this.metrics.padRight = parseFloat(cs.paddingRight) || 0;
+      // 字号/内边距变化 → 每行能放的列数变了，换行索引必须重算
+      this._wrapMeasureDirty = true;
+      this._invalidateWrap(0);
     }
 
     /* ------------------------------------------------------------ 事件绑定 */
@@ -2236,6 +2461,21 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       });
 
       window.addEventListener('resize', U.debounce(() => { this._measure(); this.render(); }, 120));
+
+      /* 编辑器容器的尺寸不一定随窗口变化：展开侧边栏、打开 Markdown 分栏预览、
+       * 拖动分隔条都会改变文本区宽度，而 window 的 resize 事件不会触发。
+       * 换行模式下宽度变了就必须重新测量列宽并重排，否则高亮层会与输入框错位。 */
+      if (typeof ResizeObserver !== 'undefined') {
+        this._lastBox = { w: -1, h: -1 };
+        this._ro = new ResizeObserver(() => {
+          const w = this.scroll.clientWidth, h = this.scroll.clientHeight;
+          if (w === this._lastBox.w && h === this._lastBox.h) return;
+          this._lastBox = { w, h };
+          this._measure();
+          this.render(true);
+        });
+        this._ro.observe(this.scroll);
+      }
     }
 
     /* --------------------------------------------------------- 文档装配 */
@@ -2251,6 +2491,10 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       this.input.scrollTop = opts.scrollTop || 0;
       this.input.scrollLeft = 0;
       this._updateGutterWidth();
+      this._wrapMeasureDirty = true;      // 新文档可能带来/去掉滚动条
+      this._invalidateWrap(0);
+      this.el.classList.toggle('wrap-on', this.wrapActive);
+      this.input.setAttribute('wrap', this.wrapActive ? 'soft' : 'off');
       this.setSelFromDoc();
       this.render(true);
     }
@@ -2265,6 +2509,114 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       this.tokenCache.clear();
       this.lineStates = [];
       this._maxStateIndex = -1;
+    }
+
+    /* ------------------------------------------------------ 自动换行索引 */
+    /** 换行是否真正生效：轻量模式（超大文件）下强制关闭，避免逐行排版卡顿 */
+    get wrapActive() { return !!(this.wrap && !this.lightweight); }
+
+    setWordWrap(on) {
+      on = !!on;
+      if (this.wrap === on) return;
+      this.wrap = on;
+      this.el.classList.toggle('wrap-on', this.wrapActive);
+      this.input.setAttribute('wrap', this.wrapActive ? 'soft' : 'off');
+      this.input.scrollLeft = 0;
+      this._wrapMeasureDirty = true;
+      this._invalidateWrap(0);
+      if (this.doc) {
+        this.render(true);
+        this.revealCaret();
+      }
+    }
+
+    _invalidateWrap(from) {
+      const f = from === undefined ? 0 : from;
+      if (!(f >= 0)) return;
+      if (this._wrapDirtyFrom > f) this._wrapDirtyFrom = f;
+      // 实测校正结果按视图行号缓存，行号会平移，所以从 f 起全部作废
+      if (this.wrapOverride.size) {
+        if (f === 0) this.wrapOverride.clear();
+        else for (const k of Array.from(this.wrapOverride.keys())) if (k >= f) this.wrapOverride.delete(k);
+      }
+    }
+
+    /** 刷新「一行能放多宽」以及滚动条占位（只在尺寸/字号变化时读布局） */
+    _refreshWrapMetrics() {
+      if (!this._wrapMeasureDirty) return;
+      this._wrapMeasureDirty = false;
+      const sw = Math.max(0, this.input.offsetWidth - this.input.clientWidth);
+      const avail = Math.max(0, this.input.clientWidth - this.metrics.padLeft - this.metrics.padRight);
+      if (sw !== this._wrapScrollW) {
+        this._wrapScrollW = sw;
+        // 高亮层没有滚动条，右侧补上等宽的内边距，折行点才能和 textarea 完全一致
+        this.hl.style.paddingRight = (this.metrics.padRight + sw) + 'px';
+        this._invalidateWrap(0);
+      }
+      if (avail !== this.wrapWidth) {
+        this.wrapWidth = avail;
+        this._invalidateWrap(0);
+      }
+    }
+
+    /**
+     * 维护 rowTop / wrapRows（仅换行模式需要）。
+     * rowTop[v] = 视图行 v 的顶部 Y（不含 padTop），长度恒为 行数+1；
+     * wrapRows[v] = 该行折成几个视觉行。
+     * 支持从任意行增量重算：打字只影响当前行及之后，不必整篇重排。
+     */
+    _ensureWrapIndex() {
+      if (!this.wrapActive) {
+        /* 不换行时行高恒定，位置全部可以纯算术得出（v * lh），
+         * 绝不能在这里建 rowTop 数组 —— 百万行文件每敲一个键重建一次会卡死。 */
+        if (this.rowTop.length) { this.rowTop.length = 0; this.wrapRows.length = 0; }
+        this._wrapDirtyFrom = Infinity;
+        return;
+      }
+      const total = this.viewLineCount;
+      const lh = this.metrics.lh;
+      const rowTop = this.rowTop;
+      const wrapRows = this.wrapRows;
+
+      this._refreshWrapMetrics();
+      const avail = this.wrapWidth;
+      const narrow = this.metrics.cw;
+      const wide = this.metrics.cwWide;
+      const tab = this.tabSize * narrow;
+
+      let from = this._wrapDirtyFrom;
+      if (from === Infinity) {
+        if (rowTop.length === total + 1) return;
+        from = 0;
+      }
+      if (from > total) from = total;
+      if (rowTop.length !== total + 1 || from === 0) from = 0;
+
+      rowTop.length = total + 1;
+      wrapRows.length = total;
+      let y = from === 0 ? 0 : (rowTop[from] || 0);
+      for (let v = from; v < total; v++) {
+        const f = this.foldAtView.get(v);
+        const text = f ? PLACEHOLDER(f.count)
+          : (this.doc.lines[this.docLineOf(v)] === undefined ? '' : this.doc.lines[this.docLineOf(v)]);
+        const ov = this.wrapOverride.get(v);
+        const r = ov !== undefined ? ov : NT.wrap.rows(text, avail, narrow, wide, tab);
+        wrapRows[v] = r;
+        rowTop[v] = y;
+        y += r * lh;
+      }
+      rowTop[total] = y;
+      this._wrapDirtyFrom = Infinity;
+    }
+
+    /** 视图行 v 的顶部 Y（不含 padTop） */
+    _topOf(v) {
+      const t = this.rowTop[v];
+      return t === undefined ? v * this.metrics.lh : t;
+    }
+    /** 视图行 v 占用的像素高度 */
+    _heightOf(v) {
+      return (this.wrapActive ? (this.wrapRows[v] || 1) : 1) * this.metrics.lh;
     }
 
     get tabSize() { return (this.app && this.app.settings && this.app.settings.tabSize) || 4; }
@@ -2401,6 +2753,8 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 
       // 分词缓存失效：只清受影响的行后缀
       this._invalidateFrom(startPos.line);
+      // 换行索引失效：有折叠时视图行与文档行不再一一对应，保守起见整体重算
+      this._invalidateWrap(this.hasFolds ? 0 : startPos.line);
 
       // 视图映射维护。
       // 折叠区之后发生的编辑：折叠区的行号不受影响，可以增量更新映射（O(1)）。
@@ -2448,6 +2802,8 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       this.foldModel = this.lightweight ? null : NT.folds.ensure(doc);
       this._rebuildViewMap();
       this._rebuildViewText();
+      this._wrapMeasureDirty = true;
+      this._invalidateWrap(0);
       const sel = { anchor: this.docToViewOffset(doc.sel.anchor), head: this.docToViewOffset(doc.sel.head) };
       this.input.value = this.viewText;
       this.input.setSelectionRange(sel.anchor, sel.head);
@@ -2570,14 +2926,29 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 
     render(force) {
       if (!this.doc) return;
+      this._ensureWrapIndex();
       const lh = this.metrics.lh;
       const st = this.input.scrollTop, sl = this.input.scrollLeft;
       const total = this.viewLineCount;
       const viewH = this.scroll.clientHeight;
+      const rowTop = this.rowTop;
 
-      let first = Math.floor((st - this.metrics.padTop) / lh) - OVERSCAN;
-      first = U.clamp(first, 0, Math.max(0, total - 1));
-      let last = Math.min(total, first + Math.ceil(viewH / lh) + OVERSCAN * 2 + 2);
+      let first, last;
+      if (this.wrapActive) {
+        /* 换行模式：行高不固定，用 rowTop 二分定位可见区间 */
+        const y = st - this.metrics.padTop;
+        let f = U.lowerBound(rowTop, y);          // 滚动顶部所在的视图行
+        if (f < 0) f = 0;
+        first = Math.max(0, f - OVERSCAN);
+        let e = U.lowerBound(rowTop, y + viewH + OVERSCAN * lh);
+        if (e < 0) e = 0;
+        last = Math.min(total, e + 1 + OVERSCAN);
+        if (last <= first) last = Math.min(total, first + 1);
+      } else {
+        first = Math.floor((st - this.metrics.padTop) / lh) - OVERSCAN;
+        first = U.clamp(first, 0, Math.max(0, total - 1));
+        last = Math.min(total, first + Math.ceil(viewH / lh) + OVERSCAN * 2 + 2);
+      }
 
       const dirty = force || first !== this._lastRender.first || last !== this._lastRender.last ||
         this._lastRender.version !== this.doc.version || this._lastRender.scroll !== st;
@@ -2597,8 +2968,37 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         }
       }
       this.hlCode.innerHTML = rows.join('');
-      this.hlCode.style.transform = 'translateY(' + (first * lh - st) + 'px)';
-      this.hl.style.transform = 'translateX(' + (-sl) + 'px)';
+
+      /* ---- 换行模式：用真实排版结果校正预测值 ----
+       * 换行列数是按「可用宽度 / 单字符宽度」估出来的，遇到宽字符、制表符、
+       * 字体回退等情况可能与浏览器实际断行差一行。这里直接读已渲染行的高度，
+       * 把实测结果写回 wrapRows 并重排一次，保证行号槽 / 当前行底色 / 高亮层
+       * 三者严格对齐。校正过的行不会再变，所以最多重排几轮就收敛。 */
+      if (this.wrapActive) {
+        if (this._wrapFixRounds < 3) {
+          const kids = this.hlCode.children;
+          let changedAt = -1;
+          for (let i = 0; i < kids.length; i++) {
+            const v = first + i;
+            const r = Math.max(1, Math.round(kids[i].offsetHeight / lh));
+            if (r !== this.wrapRows[v]) {
+              this.wrapRows[v] = r;
+              this.wrapOverride.set(v, r);
+              if (changedAt < 0) changedAt = v;
+            }
+          }
+          if (changedAt >= 0) {
+            this._wrapDirtyFrom = Math.min(this._wrapDirtyFrom, changedAt);
+            this._wrapFixRounds++;
+            this.render(true);
+            return;
+          }
+        }
+        this._wrapFixRounds = 0;
+      }
+
+      this.hlCode.style.transform = 'translateY(' + (this._topOf(first) - st) + 'px)';
+      this.hl.style.transform = 'translateX(' + (this.wrapActive ? 0 : -sl) + 'px)';
 
       /* ---- 行号槽 ---- */
       this._renderGutter(first, last, st);
@@ -2609,7 +3009,8 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       const cvl = this.viewLineOf(caretPos.line);
       const visible = cvl >= first - 1 && cvl <= last;
       this.curLine.style.display = visible ? 'block' : 'none';
-      this.curLine.style.transform = 'translateY(' + (this.metrics.padTop + cvl * lh - st) + 'px)';
+      this.curLine.style.height = this._heightOf(cvl) + 'px';
+      this.curLine.style.transform = 'translateY(' + (this.metrics.padTop + this._topOf(cvl) - st) + 'px)';
 
       this._lastRender.first = first;
       this._lastRender.last = last;
@@ -2623,14 +3024,18 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       const sel = this.doc.selRange();
       const from = this.doc.positionAt(sel.start).line;
       const to = this.doc.positionAt(sel.end).line;
+      const wrapped = this.wrapActive;
+      const lh = this.metrics.lh;
 
       for (let v = first; v < last; v++) {
         const dl = this.docLineOf(v);
         const placeholder = this.foldAtView.get(v);
+        // 换行时行号块要跟着长高，才能和右侧折行后的文本对齐
+        const hStyle = wrapped ? ' style="height:' + (this.wrapRows[v] || 1) * lh + 'px"' : '';
         if (placeholder) {
           // 占位行：不给行号（避免与折叠起始行重复），只显示折叠标记
           parts[v - first] =
-            '<div class="nt-ln folded" data-line="' + dl + '">' +
+            '<div class="nt-ln folded" data-line="' + dl + '"' + hStyle + '>' +
             '<span class="ln-fold has" title="展开">▶</span>' +
             '<span class="ln-num" style="color:var(--fg-faint)">⋯</span></div>';
           continue;
@@ -2644,17 +3049,20 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
           : '<span class="ln-fold"></span>';
         parts[v - first] =
           '<div class="nt-ln' + (active ? ' active' : '') + (isCollapsed ? ' folded' : '') +
-          '" data-line="' + dl + '">' + fold +
+          '" data-line="' + dl + '"' + hStyle + '>' + fold +
           '<span class="ln-num">' + (dl + 1) + '</span></div>';
       }
       this.gutterInner.innerHTML = parts.join('');
-      this.gutterInner.style.transform = 'translateY(' + (this.metrics.padTop + first * this.metrics.lh - st) + 'px)';
+      this.gutterInner.style.transform =
+        'translateY(' + (this.metrics.padTop + this._topOf(first) - st) + 'px)';
     }
 
     _updateGutterWidth() {
       const total = this.doc ? this.doc.lines.length : 1;
       this.metrics.digits = String(total).length;
       this.gutter.style.minWidth = (this.metrics.digits * 8 + 34) + 'px';
+      // 行号槽变宽/变窄会改变文本可用宽度，折行列数需要重新测量
+      this._wrapMeasureDirty = true;
     }
 
     /* ------------------------------------------------------------ 选区同步 */
@@ -2694,13 +3102,34 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 
     /** 保证光标可见（必要时滚动） */
     revealCaret() {
+      if (!this.doc) return;
+      this._ensureWrapIndex();
       const p = this.caret;
       const vl = this.viewLineOf(p.line);
       const lh = this.metrics.lh;
+      const st = this.input.scrollTop;
+      const vh = this.scroll.clientHeight;
+
+      /* 换行模式：光标可能落在某一行的第 n 个视觉行上，纵向按视觉行算，
+         横向不再需要滚动（soft wrap 下没有水平滚动条） */
+      if (this.wrapActive) {
+        const text = this.doc.lines[p.line] === undefined ? '' : this.doc.lines[p.line];
+        const loc = NT.wrap.locate(text, p.col, this.wrapWidth,
+          this.metrics.cw, this.metrics.cwWide, this.tabSize * this.metrics.cw);
+        const top = this.metrics.padTop + this._topOf(vl) + loc.row * lh;
+        const bottom = top + lh;
+        if (top - this.metrics.padTop < st) {
+          this.input.scrollTop = Math.max(0, top - this.metrics.padTop - lh * 2);
+        } else if (bottom > st + vh) {
+          this.input.scrollTop = bottom - vh + lh * 2;
+        }
+        if (this.input.scrollLeft) this.input.scrollLeft = 0;
+        this.scheduleRender();
+        return;
+      }
+
       const top = this.metrics.padTop + vl * lh;
       const bottom = top + lh;
-      const vh = this.scroll.clientHeight;
-      const st = this.input.scrollTop;
       if (top - this.metrics.padTop < st) this.input.scrollTop = Math.max(0, top - this.metrics.padTop - lh * 2);
       else if (bottom > st + vh) this.input.scrollTop = bottom - vh + lh * 2;
 
@@ -2713,15 +3142,16 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
     }
 
     scrollToLine(line, center) {
+      this._ensureWrapIndex();
       const vl = this.viewLineOf(U.clamp(line, 0, this.doc.lines.length - 1));
       const lh = this.metrics.lh;
+      const base = this.metrics.padTop + this._topOf(vl);
       if (center) {
-        this.input.scrollTop = Math.max(0, this.metrics.padTop + vl * lh - this.scroll.clientHeight / 2);
+        this.input.scrollTop = Math.max(0, base - this.scroll.clientHeight / 2);
       } else {
-        const top = this.metrics.padTop + vl * lh;
         const vh = this.scroll.clientHeight;
-        if (top < this.input.scrollTop || top > this.input.scrollTop + vh - lh) {
-          this.input.scrollTop = Math.max(0, top - vh / 2);
+        if (base < this.input.scrollTop || base > this.input.scrollTop + vh - lh) {
+          this.input.scrollTop = Math.max(0, base - vh / 2);
         }
       }
       this.scheduleRender();
@@ -2794,8 +3224,19 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
     /* -------------------------------------------------------- 屏幕坐标换算 */
     /** 文档偏移 → 相对 .nt-editor 的像素坐标（补全弹窗定位用） */
     pointAt(docOffset) {
+      this._ensureWrapIndex();
       const pos = this.doc.positionAt(docOffset);
       const vl = this.viewLineOf(pos.line);
+      if (this.wrapActive) {
+        const text = this.doc.lines[pos.line] === undefined ? '' : this.doc.lines[pos.line];
+        const loc = NT.wrap.locate(text, pos.col, this.wrapWidth,
+          this.metrics.cw, this.metrics.cwWide, this.tabSize * this.metrics.cw);
+        return {
+          x: this.gutter.offsetWidth + this.metrics.padLeft + loc.x,
+          y: this.metrics.padTop + this._topOf(vl) + (loc.row + 1) * this.metrics.lh - this.input.scrollTop,
+          line: pos.line, col: pos.col
+        };
+      }
       return {
         x: this.gutter.offsetWidth + this.metrics.padLeft + pos.col * this.metrics.cw - this.input.scrollLeft,
         y: this.metrics.padTop + (vl + 1) * this.metrics.lh - this.input.scrollTop,
@@ -2813,16 +3254,18 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       const r = this.doc.selRange();
       const ch = this.doc.replaceRange(r.start, r.end, text, { undo: opt.undo || 'type' });
       if (!ch) return r.start;
-      this._invalidateFrom(this.doc.positionAt(r.start).line);
-      this._afterExternalEdit();
+      const fromLine = this.doc.positionAt(r.start).line;
+      this._invalidateFrom(fromLine);
+      this._afterExternalEdit(fromLine);
       return r.start + text.length;
     }
 
     /** 外部编辑（命令/宏/插件）后统一走这里同步视图 */
-    _afterExternalEdit() {
+    _afterExternalEdit(fromLine) {
       this._lastRender.version = -1;
       if (this.hasFolds) this._fullResync();
       else {
+        this._invalidateWrap(fromLine === undefined ? 0 : fromLine);
         this.viewText = this.doc.getText();
         this.input.value = this.viewText;
         this.setSelFromDoc();
@@ -2905,7 +3348,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       this._invalidateFrom(from);
       const newStart = doc.offsetAt(from, 0);
       const newEnd = doc.lineEndOffset(to);
-      this._afterExternalEdit();
+      this._afterExternalEdit(from);
       this.setSelFromDoc(newStart, newEnd);
     }
 
@@ -2946,7 +3389,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         const PAIRS = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`' };
         if (PAIRS[before] && PAIRS[before] === after) {
           doc.remove(sel.start - 1, sel.start + 1, { undo: 'delete' });
-          this._afterExternalEdit();
+          this._afterExternalEdit(doc.positionAt(sel.start - 1).line);
           return true;
         }
       }
@@ -2959,7 +3402,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         const unit = this._indentUnit();
         const n = Math.min(unit.length, p.col);
         doc.remove(sel.start - n, sel.start, { undo: 'delete' });
-        this._afterExternalEdit();
+        this._afterExternalEdit(p.line);
         return true;
       }
       return false;
@@ -3000,7 +3443,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         doc.replaceRange(sel.start, sel.end, key + text + closer, {
           undo: 'type', sel: { anchor: sel.start + 1, head: sel.start + 1 + text.length }
         });
-        this._afterExternalEdit();
+        this._afterExternalEdit(doc.positionAt(sel.start).line);
         return true;
       }
       if (nextCh === closer) {
@@ -3021,6 +3464,9 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       if (this.lightweight === on) return;
       this.lightweight = on;
       this._resetCaches();
+      // 轻量模式会强制关闭换行，class / wrap 属性要跟着同步
+      this.el.classList.toggle('wrap-on', this.wrapActive);
+      this.input.setAttribute('wrap', this.wrapActive ? 'soft' : 'off');
       this._fullResync();
     }
   }
@@ -5241,6 +5687,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         '| 转到行 | `Ctrl+G` |',
         '| 自动补全 | `Ctrl+Space` |',
         '| 折叠 / 展开全部 | `Alt+0` / `Alt+Shift+0` |',
+        '| 自动换行开关 | `Alt+Z` |',
         '| 开始 / 停止录制宏 | `Ctrl+Shift+R` |',
         '| 回放宏 | `Ctrl+Alt+P` |',
         '| 快捷键总览 | `F1` |',
@@ -5288,7 +5735,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
     _loadSettings() {
       const def = {
         tabSize: 4, insertSpaces: true, autoIndent: true, autoClose: true,
-        wordWrap: false, showLineNumbers: true, highlightCurrentLine: true,
+        wordWrap: true, showLineNumbers: true, highlightCurrentLine: true,
         fontSize: 13, theme: 'light', macroDelay: 30, autoComplete: true,
         lightweightLines: 120000, lightweightBytes: 4 * 1024 * 1024,
         showSidebar: false, mdPreviewWidth: 0, mdAutoPreview: true
@@ -5302,6 +5749,13 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       if (!s.sidebarCollapsedOnce) {
         s.showSidebar = false;
         s.sidebarCollapsedOnce = true;
+        try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch (e) {}
+      }
+      // 一次性迁移（v1.1.5）：自动换行此前只是「死配置」，界面上没有任何开关，
+      // 所以老配置里的 false 并不代表用户的选择，这里统一打开一次。
+      if (!s.wordWrapMigrated) {
+        s.wordWrap = true;
+        s.wordWrapMigrated = true;
         try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch (e) {}
       }
       return s;
@@ -5318,7 +5772,11 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       const rail = document.getElementById('sidebarRail');
       if (railToggle) railToggle.textContent = this.settings.showSidebar ? '›' : '‹';
       if (rail) rail.title = (this.settings.showSidebar ? '收起' : '展开') + '侧边栏 (Ctrl+B)';
-      if (this.view) { this.view._measure(); this.view.render(true); }
+      if (this.view) {
+        this.view._measure();
+        this.view.setWordWrap(this.settings.wordWrap !== false);
+        this.view.render(true);
+      }
     }
 
     /* ============================================================ UI 构建 */
@@ -5377,6 +5835,10 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
           { sep: true },
           mi('edit', '剪切', 'edit.cut'), mi('edit', '复制', 'edit.copy'), mi('edit', '粘贴', 'edit.paste'),
           mi('edit', '全选', 'edit.selectAll'),
+          { sep: true },
+          mi('edit', '自动换行', 'edit.toggleWordWrap', {
+            checked: () => this.settings.wordWrap !== false
+          }),
           { sep: true },
           mi('edit', '复制当前行', 'edit.duplicateLine'), mi('edit', '删除当前行', 'edit.deleteLine'),
           mi('edit', '上移当前行', 'edit.moveLineUp'), mi('edit', '下移当前行', 'edit.moveLineDown'),
@@ -5753,12 +6215,14 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         '<div class="sb" id="sbLen"></div>' +
         '<div class="sb sb-right" id="sbPlugins"></div>' +
         '<div class="sb clickable" id="sbMd" hidden title="点击切换 Markdown 阅读模式">编辑</div>' +
+        '<div class="sb clickable" id="sbWrap" title="点击开关自动换行 (Alt+Z)">自动换行</div>' +
         '<div class="sb clickable" id="sbMode" title="点击切换轻量模式">完整模式</div>' +
         '<div class="sb" id="sbEol">LF</div>' +
         '<div class="sb">UTF-8</div>' +
         '<div class="sb clickable" id="sbLang">纯文本</div>';
       sb.querySelector('#sbLang').addEventListener('click', () => this._openMenu(this.el.menubar.querySelector('[data-menu="lang"]')));
       sb.querySelector('#sbMode').addEventListener('click', () => this.exec('view.toggleLightweight'));
+      sb.querySelector('#sbWrap').addEventListener('click', () => this.exec('edit.toggleWordWrap'));
       sb.querySelector('#sbMd').addEventListener('click', () => this.exec('md.cycleMode'));
       this._sbPlugins = sb.querySelector('#sbPlugins');
       this._pluginStatusHost = document.createElement('div');
@@ -5786,6 +6250,16 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
       sb.querySelector('#sbEol').textContent = doc.eol === '\r\n' ? 'CRLF' : doc.eol === '\r' ? 'CR' : 'LF';
       sb.querySelector('#sbLang').textContent = NT.languages.get(doc.language).name;
       sb.querySelector('#sbMode').textContent = this.view.lightweight ? '轻量模式' : '完整模式';
+
+      // 自动换行状态：常驻可见，避免用户找不到这个开关
+      const wrapEl = sb.querySelector('#sbWrap');
+      if (wrapEl) {
+        const on = this.settings.wordWrap !== false;
+        wrapEl.textContent = on ? '自动换行' : '不换行';
+        wrapEl.style.opacity = on ? '1' : '.55';
+        wrapEl.title = (on ? '自动换行已开启' : '自动换行已关闭') +
+          (this.view.lightweight ? '（轻量模式/超大文件下暂不生效）' : '') + ' · 点击或按 Alt+Z 切换';
+      }
 
       // Markdown 模式指示：只在 Markdown 文档上出现，点击循环 编辑 → 分栏 → 阅读
       const mdEl = sb.querySelector('#sbMd');
@@ -6639,6 +7113,17 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
         run: () => view()._handleTab(false) });
       C({ id: 'edit.outdent', title: '减少缩进', category: '编辑',
         run: () => view()._handleTab(true) });
+
+      /* 自动换行：Notepad++ 的同类开关也在「编辑」菜单，快捷键同为 Alt+Z */
+      C({ id: 'edit.toggleWordWrap', title: '自动换行', keybinding: 'Alt+Z', category: '编辑',
+        run: () => {
+          this.settings.wordWrap = this.settings.wordWrap === false;
+          this.saveSettings();
+          this._applySettings();
+          const on = this.settings.wordWrap !== false;
+          this.toast(on ? '已开启自动换行' : '已关闭自动换行（长行需横向滚动）', 'ok');
+          this.refreshStatus();
+        } });
 
       C({ id: 'edit.gotoLine', title: '转到行…', keybinding: 'Ctrl+G', category: '编辑',
         run: async () => {

@@ -11,7 +11,7 @@
    *   · 改版本请用 `node bump-version.js patch|minor|major|X.Y.Z`（会同时改这里）；
    *   · build.py 打包时还会用 package.json 覆盖此字面量，确保交付产物一定正确；
    *   · core.test.js 有一条断言校验此处与 package.json 一致，漂移会被测出来。*/
-  NT.version = '1.1.4';
+  NT.version = '1.2.0';
 
   /* ------------------------------------------------------------------ 事件总线
    * 全局单例。约定的事件名（节选）：
