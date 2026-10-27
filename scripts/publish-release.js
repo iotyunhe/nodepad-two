@@ -112,7 +112,14 @@ async function api(token, method, url, body) {
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch (e) { /* 非 JSON */ }
   if (!res.ok) {
-    const msg = (json && (json.message || json.error)) || text.slice(0, 300);
+    // GitHub 的 message 常常只有一句 "Validation Failed"，
+    // 真正的原因在 errors[] 里（哪个字段、什么错），一并带出来否则没法排查
+    let msg = (json && (json.message || json.error)) || text.slice(0, 300);
+    if (json && Array.isArray(json.errors) && json.errors.length) {
+      msg += '（' + json.errors.map((e) =>
+        (e.resource ? e.resource + '.' : '') + (e.field ? e.field + ': ' : '') + (e.code || '') +
+        (e.message ? ' ' + e.message : '')).join('; ') + '）';
+    }
     throw new Error('HTTP ' + res.status + '：' + msg);
   }
   return json;
@@ -204,13 +211,28 @@ async function main() {
 
   for (const file of assets) {
     const name = path.basename(file);
-    const existing = (release.assets || []).find((a) => a.name === name);
+    // GitHub 会把资产名里的空格换成点（"Notepad Two-1.2.0-x64.msi" 落库后是
+    // "Notepad.Two-1.2.0-x64.msi"），直接比原文件名会误判为「不存在」，
+    // 再传一次就会 422 already_exists。这里统一归一化后比较。
+    const norm = (n) => String(n).replace(/\s+/g, '.').toLowerCase();
+    const existing = (release.assets || []).find((a) => a.name === name || norm(a.name) === norm(name));
     if (existing) {
-      console.log('  跳过（已存在）: ' + name);
+      console.log('  跳过（已存在）: ' + existing.name + ' (' + (existing.size / 1048576).toFixed(1) + ' MB)');
       continue;
     }
     process.stdout.write('  上传 ' + name + ' ... ');
-    const a = await uploadAsset(token, release.upload_url, file);
+    let a;
+    try {
+      a = await uploadAsset(token, release.upload_url, file);
+    } catch (e) {
+      // 并发/残留导致的 already_exists 不算失败，重新拉一次资产列表核对
+      if (/already_exists/.test(e.message)) {
+        const fresh = await api(token, 'GET', base + '/releases/tags/' + encodeURIComponent(tag));
+        const hit = (fresh.assets || []).find((x) => norm(x.name) === norm(name));
+        if (hit) { console.log('已存在 (' + (hit.size / 1048576).toFixed(1) + ' MB)'); continue; }
+      }
+      throw e;
+    }
     console.log('OK (' + (a.size / 1048576).toFixed(1) + ' MB)');
   }
 
