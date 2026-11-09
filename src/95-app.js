@@ -165,6 +165,7 @@
         '| 自动补全 | `Ctrl+Space` |',
         '| 折叠 / 展开全部 | `Alt+0` / `Alt+Shift+0` |',
         '| 自动换行开关 | `Alt+Z` |',
+        '| 文本对比 | `Ctrl+Alt+D` |',
         '| 开始 / 停止录制宏 | `Ctrl+Shift+R` |',
         '| 回放宏 | `Ctrl+Alt+P` |',
         '| 快捷键总览 | `F1` |',
@@ -331,7 +332,9 @@
           mi('search', '查找下一个', 'search.findNext'), mi('search', '查找上一个', 'search.findPrev'),
           mi('search', '清除高亮', 'search.clear'),
           { sep: true },
-          mi('search', '统计匹配数', 'search.count')
+          mi('search', '统计匹配数', 'search.count'),
+          { sep: true },
+          mi('search', '文本对比…', 'tools.compare', { key: 'Ctrl+Alt+D' })
         ],
         view: [
           mi('view', '显示侧边栏', 'view.toggleSidebar', { checked: () => this.settings.showSidebar }),
@@ -1172,7 +1175,7 @@
       });
     }
 
-    /** 带表单的通用对话框：fields = [{key,label,type,value,options,placeholder}] */
+    /** 带表单的通用对话框：fields = [{key,label,type:'text|select|textarea',value,options,placeholder,rows}] */
     form(opt) {
       return new Promise((resolve) => {
         const card = this.el.overlayCard;
@@ -1182,12 +1185,23 @@
           (opt.message ? '<p style="line-height:1.7;color:var(--fg-dim);margin:0 0 14px">' + U.esc(opt.message) + '</p>' : '') +
           fields.map((f) => {
             if (f.type === 'select') {
-              return '<div class="orow"><label>' + U.esc(f.label) + '</label><select data-k="' + f.key + '">' +
+              return '<div class="orow" data-field="' + U.esc(f.key) + '"><label>' + U.esc(f.label) + '</label><select data-k="' + f.key + '"' +
+                (f.showKey ? ' data-show="' + U.esc(f.showKey) + '"' : '') +
+                (f.showVal ? ' data-showval="' + U.esc(f.showVal) + '"' : '') + '>' +
                 (f.options || []).map((o) => '<option value="' + U.esc(o.value) + '"' +
                   (String(o.value) === String(f.value) ? ' selected' : '') + '>' + U.esc(o.label) + '</option>').join('') +
                 '</select></div>';
             }
-            return '<div class="orow"><label>' + U.esc(f.label) + '</label>' +
+            if (f.type === 'textarea') {
+              return '<div class="orow" data-field="' + U.esc(f.key) + '"' +
+                (f.showKey ? ' data-show="' + U.esc(f.showKey) + '"' : '') +
+                (f.showVal ? ' data-showval="' + U.esc(f.showVal) + '"' : '') + '><label>' + U.esc(f.label) + '</label>' +
+                '<textarea data-k="' + f.key + '" rows="' + (f.rows || 6) + '" style="width:100%;font-family:var(--nt-font);resize:vertical"' +
+                ' placeholder="' + U.esc(f.placeholder || '') + '">' + U.esc(f.value === undefined ? '' : f.value) + '</textarea></div>';
+            }
+            return '<div class="orow" data-field="' + U.esc(f.key) + '"' +
+              (f.showKey ? ' data-show="' + U.esc(f.showKey) + '"' : '') +
+              (f.showVal ? ' data-showval="' + U.esc(f.showVal) + '"' : '') + '><label>' + U.esc(f.label) + '</label>' +
               '<input type="text" data-k="' + f.key + '" value="' + U.esc(f.value === undefined ? '' : f.value) + '" ' +
               'placeholder="' + U.esc(f.placeholder || '') + '"></div>';
           }).join('') +
@@ -1195,13 +1209,34 @@
           '<button class="btn" data-r="cancel">取消</button>' +
           '<button class="btn primary" data-r="ok">' + U.esc(opt.okLabel || '确定') + '</button></div>';
         this.el.overlay.hidden = false;
-        const first = card.querySelector('input,select');
+        const first = card.querySelector('input,select,textarea');
         if (first) first.focus();
+
+        // 联动显隐：如果字段有 showKey/showVal，当 showKey 对应的字段值 === showVal 时显示，否则隐藏
+        const updateVisibility = () => {
+          card.querySelectorAll('[data-show]').forEach((row) => {
+            const showKey = row.dataset.show;
+            const showVal = row.dataset.showval;
+            const triggerEl = card.querySelector('[data-k="' + showKey + '"]');
+            const curVal = triggerEl ? triggerEl.value : '';
+            row.style.display = curVal === showVal ? '' : 'none';
+          });
+        };
+        card.querySelectorAll('[data-k]').forEach((el) => {
+          if (el.tagName === 'SELECT') el.addEventListener('change', updateVisibility);
+        });
+        updateVisibility();
+
         const done = (ok) => {
           this.el.overlay.hidden = true;
           if (!ok) return resolve(null);
           const out = {};
-          card.querySelectorAll('[data-k]').forEach((n) => { out[n.dataset.k] = n.value; });
+          card.querySelectorAll('[data-k]').forEach((n) => {
+            // 跳过隐藏的字段
+            const row = n.closest('[data-field]');
+            if (row && row.style.display === 'none') return;
+            out[n.dataset.k] = n.value;
+          });
           resolve(out);
         };
         card.querySelectorAll('[data-r]').forEach((b) => b.addEventListener('click', () => done(b.dataset.r === 'ok')));
@@ -1324,6 +1359,334 @@
         this.refreshSidebar();
       });
       window.addEventListener('resize', U.debounce(() => this.view.render(true), 150));
+    }
+
+    /* ============================================================ 文本对比 */
+    /**
+     * 打开对比对话框：让用户选择两个文本来源（已有标签页 / 粘贴文本）。
+     */
+    async _openCompareDialog() {
+      // 如果已经有对比视图打开，先关掉
+      if (this._diffView) this._closeCompare();
+
+      const tabNames = this.tabs.map((t) => t.name);
+      const tabOptions = tabNames.length
+        ? tabNames.map((n, i) => ({ value: String(i), label: (i + 1) + '. ' + n }))
+        : [{ value: '-1', label: '（无打开的标签页）' }];
+
+      const r = await this.form({
+        title: '文本对比',
+        message: '选择两段文本进行差异对比。可以从已打开的标签页选择，也可以直接粘贴。',
+        fields: [
+          {
+            key: 'mode', label: '来源', type: 'select', value: 'tabs', options: [
+              { value: 'tabs', label: '从标签页选择' },
+              { value: 'paste', label: '粘贴文本' }
+            ]
+          },
+          { key: 'aTab', label: 'A 文本', type: 'select', value: '0', options: tabOptions, showKey: 'mode', showVal: 'tabs' },
+          { key: 'bTab', label: 'B 文本', type: 'select', value: tabOptions.length > 1 ? '1' : '0', options: tabOptions, showKey: 'mode', showVal: 'tabs' },
+          { key: 'aText', label: 'A 文本', type: 'textarea', value: '', placeholder: '粘贴 A 文本…', rows: 8, showKey: 'mode', showVal: 'paste' },
+          { key: 'bText', label: 'B 文本', type: 'textarea', value: '', placeholder: '粘贴 B 文本…', rows: 8, showKey: 'mode', showVal: 'paste' }
+        ],
+        okLabel: '开始对比'
+      });
+      if (!r) return;
+
+      let aText, bText, aName = 'A', bName = 'B';
+      if (r.mode === 'tabs') {
+        const ai = parseInt(r.aTab, 10), bi = parseInt(r.bTab, 10);
+        if (ai < 0 || bi < 0 || ai >= this.tabs.length || bi >= this.tabs.length) {
+          this.toast('请选择有效的标签页', 'err'); return;
+        }
+        if (ai === bi) {
+          this.toast('A 和 B 不能是同一个标签页', 'err'); return;
+        }
+        aText = this.tabs[ai].doc.getText();
+        bText = this.tabs[bi].doc.getText();
+        aName = this.tabs[ai].name;
+        bName = this.tabs[bi].name;
+      } else {
+        aText = r.aText || '';
+        bText = r.bText || '';
+        if (!aText && !bText) { this.toast('两段文本都为空', 'err'); return; }
+      }
+      this._showCompare(aText, bText, aName, bName);
+    }
+
+    /**
+     * 渲染对比视图。
+     * 创建一个覆盖在编辑器区域的面板，双栏并排显示 A/B 文本。
+     */
+    _showCompare(aText, bText, aName, bName) {
+      const blocks = NT.diff.computeText(aText, bText);
+      const sum = NT.diff.summary(blocks);
+      const diffBlocks = blocks.filter((b) => b.type !== 'equal');
+      this._diffState = { blocks, diffBlocks, aText, bText, aName, bName, curDiff: -1, result: null };
+
+      // 创建容器
+      const host = document.getElementById('editorHost');
+      const panel = document.createElement('div');
+      panel.className = 'diff-panel';
+      panel.innerHTML = this._diffPanelHTML(aName, bName, sum);
+      host.appendChild(panel);
+      this._diffView = panel;
+
+      // 填充内容
+      this._renderDiffContent();
+
+      // 绑定事件
+      this._bindDiffEvents();
+
+      // 跳到第一个差异
+      if (diffBlocks.length > 0) {
+        this._diffNavigate(1);
+      }
+    }
+
+    _diffPanelHTML(aName, bName, sum) {
+      const total = sum.added + sum.removed;
+      return (
+        '<div class="diff-toolbar">' +
+          '<span class="diff-title">文本对比</span>' +
+          '<span class="diff-summary">' +
+            (total === 0 ? '两段文本完全相同' :
+              (sum.added ? '<span class="diff-added-count">+' + sum.added + '</span>' : '') +
+              (sum.removed ? '<span class="diff-removed-count">-' + sum.removed + '</span>' : '') +
+              ' 共 ' + this._diffState.diffBlocks.length + ' 处差异') +
+          '</span>' +
+          '<span class="diff-nav">' +
+            '<button class="btn small" id="diffPrev" title="上一个差异 (Alt+Shift+←)" disabled>↑</button>' +
+            '<span id="diffPos">0 / 0</span>' +
+            '<button class="btn small" id="diffNext" title="下一个差异 (Alt+Shift+→)" disabled>↓</button>' +
+          '</span>' +
+          '<span class="diff-spacer"></span>' +
+          '<button class="btn small primary" id="diffApply" disabled>应用到当前文档</button>' +
+          '<button class="btn small" id="diffClose" title="关闭 (Esc)">✕ 关闭</button>' +
+        '</div>' +
+        '<div class="diff-header">' +
+          '<div class="diff-side-header">A: ' + U.esc(aName) + '</div>' +
+          '<div class="diff-side-header">B: ' + U.esc(bName) + '</div>' +
+        '</div>' +
+        '<div class="diff-body" id="diffBody">' +
+          '<div class="diff-side" id="diffSideA"></div>' +
+          '<div class="diff-side" id="diffSideB"></div>' +
+        '</div>'
+      );
+    }
+
+    _renderDiffContent() {
+      const { blocks } = this._diffState;
+      const sideA = this._diffView.querySelector('#diffSideA');
+      const sideB = this._diffView.querySelector('#diffSideB');
+      let aHtml = '', bHtml = '';
+      let diffIdx = 0;
+
+      for (const blk of blocks) {
+        const isDiff = blk.type !== 'equal';
+        const cls = isDiff ? ' diff-row-' + blk.type : '';
+        const diffAttr = isDiff ? ' data-diff="' + diffIdx + '"' : '';
+
+        if (blk.type === 'equal') {
+          for (let i = 0; i < blk.aLines.length; i++) {
+            aHtml += this._diffRow('equal', blk.aLines[i], blk.aStart + i, diffAttr, diffIdx);
+            bHtml += this._diffRow('equal', blk.bLines[i], blk.bStart + i, diffAttr, diffIdx);
+          }
+        } else if (blk.type === 'added') {
+          // B 侧有行，A 侧空
+          for (let i = 0; i < blk.bLines.length; i++) {
+            bHtml += this._diffRow('added', blk.bLines[i], blk.bStart + i, diffAttr, diffIdx);
+            aHtml += this._diffRow('empty', '', -1, diffAttr, diffIdx);
+          }
+        } else if (blk.type === 'removed') {
+          // A 侧有行，B 侧空
+          for (let i = 0; i < blk.aLines.length; i++) {
+            aHtml += this._diffRow('removed', blk.aLines[i], blk.aStart + i, diffAttr, diffIdx);
+            bHtml += this._diffRow('empty', '', -1, diffAttr, diffIdx);
+          }
+        } else if (blk.type === 'changed') {
+          // 两侧行数可能不同，用 padding 对齐
+          const maxLines = Math.max(blk.aLines.length, blk.bLines.length);
+          for (let i = 0; i < maxLines; i++) {
+            const aLine = i < blk.aLines.length ? blk.aLines[i] : null;
+            const bLine = i < blk.bLines.length ? blk.bLines[i] : null;
+            aHtml += aLine !== null
+              ? this._diffRow('changed', aLine, blk.aStart + i, diffAttr, diffIdx)
+              : this._diffRow('empty', '', -1, diffAttr, diffIdx);
+            bHtml += bLine !== null
+              ? this._diffRow('changed', bLine, blk.bStart + i, diffAttr, diffIdx)
+              : this._diffRow('empty', '', -1, diffAttr, diffIdx);
+          }
+        }
+        if (isDiff) diffIdx++;
+      }
+
+      sideA.innerHTML = aHtml;
+      sideB.innerHTML = bHtml;
+    }
+
+    /** 渲染一行对比内容 */
+    _diffRow(type, text, lineNo, diffAttr, diffIdx) {
+      const lineLabel = lineNo >= 0 ? (lineNo + 1) : '';
+      // 对 changed / added / removed 行，在行首加操作按钮
+      let actions = '';
+      if (type === 'changed' || type === 'removed') {
+        actions += '<button class="diff-act" data-act="useA" data-diff="' + diffIdx +
+          '" title="用 A 的内容">←A</button>';
+      }
+      if (type === 'changed' || type === 'added') {
+        actions += '<button class="diff-act" data-act="useB" data-diff="' + diffIdx +
+          '" title="用 B 的内容">B→</button>';
+      }
+      const content = U.esc(text).replace(/ /g, '&nbsp;') || '&nbsp;';
+      return '<div class="diff-row diff-row-' + type + '"' + diffAttr + '>' +
+        '<span class="diff-lineno">' + lineLabel + '</span>' +
+        '<span class="diff-actions">' + actions + '</span>' +
+        '<span class="diff-text">' + content + '</span>' +
+        '</div>';
+    }
+
+    _bindDiffEvents() {
+      const panel = this._diffView;
+      panel.querySelector('#diffClose').addEventListener('click', () => this._closeCompare());
+      panel.querySelector('#diffPrev').addEventListener('click', () => this._diffNavigate(-1));
+      panel.querySelector('#diffNext').addEventListener('click', () => this._diffNavigate(1));
+      panel.querySelector('#diffApply').addEventListener('click', () => this._applyCompareResult());
+
+      // 采纳按钮
+      panel.querySelectorAll('.diff-act').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const diffIdx = parseInt(btn.dataset.diff, 10);
+          const act = btn.dataset.act; // 'useA' or 'useB'
+          this._applyDiffChoice(diffIdx, act);
+        });
+      });
+
+      // 点击差异行跳转
+      panel.querySelectorAll('.diff-row[data-diff]').forEach((row) => {
+        row.addEventListener('click', () => {
+          const idx = parseInt(row.dataset.diff, 10);
+          this._diffScrollTo(idx);
+        });
+      });
+    }
+
+    /** 导航到上一个/下一个差异 */
+    _diffNavigate(dir) {
+      if (!this._diffState || !this._diffState.diffBlocks.length) return;
+      const { diffBlocks } = this._diffState;
+      let cur = this._diffState.curDiff;
+      cur += dir;
+      if (cur < 0) cur = diffBlocks.length - 1;
+      if (cur >= diffBlocks.length) cur = 0;
+      this._diffScrollTo(cur);
+    }
+
+    _diffScrollTo(idx) {
+      if (!this._diffView) return;
+      this._diffState.curDiff = idx;
+      const total = this._diffState.diffBlocks.length;
+      const posEl = this._diffView.querySelector('#diffPos');
+      if (posEl) posEl.textContent = (idx + 1) + ' / ' + total;
+
+      // 滚动到对应行
+      const row = this._diffView.querySelector('[data-diff="' + idx + '"]');
+      if (row) {
+        // 滚动两个面板都到这个位置
+        const body = this._diffView.querySelector('#diffBody');
+        const rowTop = row.offsetTop;
+        const bodyH = body.clientHeight;
+        body.scrollTop = Math.max(0, rowTop - bodyH / 3);
+
+        // 高亮当前差异块
+        this._diffView.querySelectorAll('.diff-row.diff-current').forEach((r) => r.classList.remove('diff-current'));
+        this._diffView.querySelectorAll('[data-diff="' + idx + '"]').forEach((r) => r.classList.add('diff-current'));
+      }
+
+      // 更新导航按钮状态
+      const prev = this._diffView.querySelector('#diffPrev');
+      const next = this._diffView.querySelector('#diffNext');
+      if (prev) prev.disabled = total === 0;
+      if (next) next.disabled = total === 0;
+    }
+
+    /**
+     * 采纳某个差异块的选择。
+     * @param {number} diffIdx - 在 diffBlocks 中的索引
+     * @param {'useA'|'useB'} act - 使用 A 还是 B 的内容
+     */
+    _applyDiffChoice(diffIdx, act) {
+      const state = this._diffState;
+      if (!state) return;
+      const blk = state.diffBlocks[diffIdx];
+      if (!blk) return;
+
+      // 在 result 中记录这个差异块的选择
+      if (!state.result) state.result = {};
+      state.result[diffIdx] = act;
+
+      // 更新行样式
+      const rows = this._diffView.querySelectorAll('[data-diff="' + diffIdx + '"]');
+      rows.forEach((r) => {
+        r.classList.remove('diff-resolved');
+        r.classList.add('diff-resolved');
+        r.dataset.resolved = act;
+      });
+
+      // 启用"应用到当前文档"按钮
+      const applyBtn = this._diffView.querySelector('#diffApply');
+      if (applyBtn) applyBtn.disabled = false;
+
+      const choiceText = act === 'useA' ? 'A 的内容' : 'B 的内容';
+      this.toast('差异 #' + (diffIdx + 1) + ' 已选择使用 ' + choiceText, 'ok');
+
+      // 自动跳到下一个未解决的差异
+      this._diffNavigate(1);
+    }
+
+    /**
+     * 将所有已选择的差异应用到一个新文档（或当前文档）。
+     * 构建最终文本：对每个差异块，按用户选择取 A 或 B 的行；
+     * 对未选择的块，默认取 A 的行。
+     */
+    _applyCompareResult() {
+      const state = this._diffState;
+      if (!state) return;
+      const { blocks, diffBlocks, result, aText, bText } = state;
+
+      // 构建最终文本
+      const outLines = [];
+      let diffIdx = 0;
+      for (const blk of blocks) {
+        if (blk.type === 'equal') {
+          outLines.push(...blk.aLines);
+        } else {
+          const choice = result ? result[diffIdx] : null;
+          if (choice === 'useA') {
+            outLines.push(...blk.aLines);
+          } else if (choice === 'useB') {
+            outLines.push(...blk.bLines);
+          } else {
+            // 未选择的默认用 A
+            outLines.push(...blk.aLines);
+          }
+          diffIdx++;
+        }
+      }
+      const finalText = outLines.join('\n');
+
+      // 打开一个新标签页展示结果
+      this.newTab(new NT.Document(finalText, { name: '对比结果', language: 'plaintext' }), { activate: true });
+      this.toast('已将对比结果应用到新标签页', 'ok');
+    }
+
+    /** 关闭对比视图 */
+    _closeCompare() {
+      if (!this._diffView) return;
+      this._diffView.remove();
+      this._diffView = null;
+      this._diffState = null;
     }
 
     /* ============================================================ exec */
@@ -1945,6 +2308,19 @@
             buttons: [{ id: 'ok', label: '好的', primary: true }]
           });
         } });
+
+      /* ---------------------------------------------------------- 文本对比 */
+      C({ id: 'tools.compare', title: '文本对比', keybinding: 'Ctrl+Alt+D', category: '搜索',
+        run: () => this._openCompareDialog() });
+      C({ id: 'tools.comparePrevDiff', title: '上一个差异', keybinding: 'Alt+Shift+Left', category: '搜索',
+        enabled: () => !!this._diffView,
+        run: () => this._diffNavigate(-1) });
+      C({ id: 'tools.compareNextDiff', title: '下一个差异', keybinding: 'Alt+Shift+Right', category: '搜索',
+        enabled: () => !!this._diffView,
+        run: () => this._diffNavigate(1) });
+      C({ id: 'tools.compareClose', title: '关闭对比视图', keybinding: 'Escape', category: '搜索',
+        enabled: () => !!this._diffView,
+        run: () => this._closeCompare() });
     }
   }
 

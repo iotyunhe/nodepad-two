@@ -564,3 +564,115 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
   padding: 5px 12px; background: var(--warn); color: #fff; font-size: 12px;
 }
 .bigfile-banner .btn { padding: 3px 10px; background: rgba(255,255,255,.9); border-color: transparent; color: #333; }
+
+/* ====================================================== 文本对比视图 */
+.diff-panel {
+  position: absolute; inset: 0; z-index: 40;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+  font-family: var(--nt-font-ui);
+}
+
+.diff-toolbar {
+  display: flex; align-items: center; gap: 10px; flex: none;
+  padding: 6px 12px; background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+.diff-title { font-weight: 600; color: var(--accent); white-space: nowrap; }
+.diff-summary { font-size: 12px; color: var(--fg-dim); white-space: nowrap; }
+.diff-added-count { color: var(--ok); font-weight: 600; margin-right: 4px; }
+.diff-removed-count { color: var(--danger); font-weight: 600; margin-right: 4px; }
+.diff-nav { display: flex; align-items: center; gap: 6px; }
+.diff-nav #diffPos { font-size: 12px; color: var(--fg-dim); min-width: 50px; text-align: center; }
+.diff-spacer { flex: 1; }
+.btn.small { padding: 3px 10px; font-size: 12px; border-radius: 5px; }
+
+.diff-header {
+  display: flex; flex: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-alt);
+}
+.diff-side-header {
+  flex: 1; padding: 4px 12px;
+  font-size: 12px; font-weight: 600; color: var(--fg-dim);
+  border-right: 1px solid var(--border);
+}
+.diff-side-header:last-child { border-right: none; }
+
+.diff-body {
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+  display: flex;
+}
+.diff-side {
+  flex: 1; overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+.diff-side:last-child { border-right: none; }
+
+/* 对比行 */
+.diff-row {
+  display: flex; align-items: stretch;
+  font-family: var(--nt-font); font-size: var(--nt-font-size);
+  line-height: var(--nt-line-height);
+  border-bottom: 1px solid transparent;
+  min-height: var(--nt-line-height);
+}
+.diff-row .diff-lineno {
+  flex: none; width: 48px; text-align: right;
+  padding-right: 8px; color: var(--fg-faint);
+  user-select: none; border-right: 1px solid var(--border);
+  background: var(--gutter-bg);
+}
+.diff-row .diff-actions {
+  flex: none; width: 70px;
+  display: flex; align-items: center; gap: 2px;
+  padding: 0 4px;
+}
+.diff-act {
+  padding: 0 6px; font-size: 10px; line-height: 16px;
+  border-radius: 3px; border: 1px solid var(--border);
+  background: var(--bg-elev); cursor: pointer;
+  color: var(--fg-dim);
+}
+.diff-act:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.diff-row .diff-text {
+  flex: 1; padding: 0 8px;
+  white-space: pre-wrap; word-break: break-all;
+  overflow-wrap: break-word;
+}
+
+/* 差异行配色（浅色） */
+.diff-row-equal { background: transparent; }
+.diff-row-added { background: rgba(26, 127, 55, .08); }
+.diff-row-removed { background: rgba(209, 36, 47, .08); }
+.diff-row-changed { background: rgba(183, 107, 1, .10); }
+.diff-row-empty { background: var(--bg-alt); }
+.diff-row-empty .diff-text { color: var(--fg-faint); }
+.diff-row-empty .diff-lineno { color: transparent; }
+
+/* 当前定位的差异块 */
+.diff-row.diff-current {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* 已采纳的差异块 */
+.diff-row.diff-resolved { opacity: .6; }
+.diff-row.diff-resolved[data-resolved="useA"] { background: rgba(26, 127, 55, .04); }
+.diff-row.diff-resolved[data-resolved="useB"] { background: rgba(26, 127, 55, .04); }
+.diff-row.diff-resolved .diff-act { pointer-events: none; }
+
+/* 深色主题差异配色 */
+html[data-theme="dark"] .diff-row-added { background: rgba(78, 194, 122, .12); }
+html[data-theme="dark"] .diff-row-removed { background: rgba(242, 104, 111, .12); }
+html[data-theme="dark"] .diff-row-changed { background: rgba(224, 164, 88, .12); }
+html[data-theme="dark"] .diff-row-empty { background: var(--bg-alt); }
+
+/* 表单中的 textarea */
+.orow textarea {
+  width: 100%; padding: 6px 10px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--fg);
+  font-size: 12px; resize: vertical;
+}
+.orow textarea:focus { outline: none; border-color: var(--accent); }

@@ -102,6 +102,7 @@ python test/verify-installer-zh.py "release/Notepad Two-1.1.2-x64.msi" \
 | 语法高亮 | 19 种语言：JS/TS/Python/HTML/XML/CSS/JSON/Markdown/C/C++/Java/C#/Go/Rust/SQL/Shell/YAML/INI/纯文本 |
 | 代码折叠 | 括号配对 + 缩进层级 + `region` 标记；按层级折叠；行号槽点击 |
 | 自动换行 | 长行按词边界折行（`Alt+Z` 或「编辑 → 自动换行」）；CJK/制表符按真实宽度排版 |
+| 文本对比 | 双栏并排显示 A/B 文本差异，高亮增删改；逐处选择用 A 或 B 的内容；快捷键 `Ctrl+Alt+D` |
 | 自动补全 | 关键字/类型/内置 API（从高亮规则自动提取）+ 文档词 + 代码片段，支持插件扩展 |
 | 查找替换 | 正则、大小写、全词、选区内；`$1` 反向引用；全部替换可一次撤销 |
 | 宏录制回放 | 录制语义化命令，可命名/导出/导入，支持多轮回放，整段可撤销 |
@@ -150,6 +151,7 @@ python test/verify-installer-zh.py "release/Notepad Two-1.1.2-x64.msi" \
 | 切换行注释 | `Ctrl+/` |
 | 折叠 / 展开全部 | `Alt+0` / `Alt+Shift+0` |
 | 自动换行开关 | `Alt+Z` |
+| 文本对比 | `Ctrl+Alt+D` |
 | 开始停止录制宏 / 回放 | `Ctrl+Shift+R` / `Ctrl+Alt+P` |
 | 显示侧边栏 / 切换主题 | `Ctrl+B` / `Ctrl+Shift+D` |
 | 快捷键总览 | `F1` |

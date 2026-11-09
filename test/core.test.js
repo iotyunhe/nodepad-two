@@ -7,6 +7,7 @@ require(path.join(__dirname, '..', 'src', '10-document.js'));
 require(path.join(__dirname, '..', 'src', '20-languages.js'));
 require(path.join(__dirname, '..', 'src', '30-folds.js'));
 require(path.join(__dirname, '..', 'src', '38-wrap.js'));
+require(path.join(__dirname, '..', 'src', '39-diff.js'));
 require(path.join(__dirname, '..', 'src', '60-search.js'));
 
 let pass = 0, fail = 0;
@@ -338,6 +339,131 @@ function ok(cond, name) { if (cond) pass++; else { fail++; console.error('✗ ' 
   const ms = Date.now() - t0;
   eq(acc, 10000, '换行：1 万行短行均为 1 个视觉行');
   ok(ms < 3000, '换行：1 万行计算耗时 ' + ms + 'ms');
+}
+
+/* ----------------------------------------------------- 文本对比（39-diff.js） */
+{
+  const D = NT.diff;
+  ok(typeof D === 'object' && typeof D.compute === 'function', 'diff 模块导出存在');
+  ok(typeof D.computeText === 'function', 'diff.computeText 存在');
+  ok(typeof D.summary === 'function', 'diff.summary 存在');
+
+  // 完全相同的文本 → 一个 equal 块
+  {
+    const r = D.computeText('abc\ndef\nghi', 'abc\ndef\nghi');
+    eq(r.length, 1, 'diff: 相同文本 → 1 个块');
+    eq(r[0].type, 'equal', 'diff: 相同文本 → equal');
+    eq(r[0].aLines, ['abc', 'def', 'ghi'], 'diff: 相同文本 aLines');
+    eq(r[0].bLines, ['abc', 'def', 'ghi'], 'diff: 相同文本 bLines');
+    eq(r[0].aStart, 0, 'diff: 相同文本 aStart=0');
+    eq(r[0].aEnd, 3, 'diff: 相同文本 aEnd=3');
+  }
+
+  // 完全不同 → 一个 changed 块
+  {
+    const r = D.computeText('aaa', 'bbb');
+    eq(r.length, 1, 'diff: 完全不同 → 1 个块');
+    eq(r[0].type, 'changed', 'diff: 完全不同 → changed');
+    eq(r[0].aLines, ['aaa'], 'diff: 完全不同 aLines');
+    eq(r[0].bLines, ['bbb'], 'diff: 完全不同 bLines');
+  }
+
+  // 中间修改：line1\nline2\nline3 → line1\nMODIFIED\nline3
+  {
+    const r = D.computeText('line1\nline2\nline3', 'line1\nMODIFIED\nline3');
+    eq(r.length, 3, 'diff: 中间修改 → 3 块 (equal/changed/equal)');
+    eq(r[0].type, 'equal', 'diff: 中间修改[0]=equal');
+    eq(r[1].type, 'changed', 'diff: 中间修改[1]=changed');
+    eq(r[2].type, 'equal', 'diff: 中间修改[2]=equal');
+    eq(r[1].aLines, ['line2'], 'diff: 中间修改 aLines=[line2]');
+    eq(r[1].bLines, ['MODIFIED'], 'diff: 中间修改 bLines=[MODIFIED]');
+  }
+
+  // 新增行：a\nb → a\nNEW\nb
+  {
+    const r = D.computeText('a\nb', 'a\nNEW\nb');
+    const types = r.map(b => b.type);
+    ok(types.includes('added'), 'diff: 新增行包含 added 块');
+    const added = r.find(b => b.type === 'added');
+    eq(added.bLines, ['NEW'], 'diff: 新增行 bLines=[NEW]');
+    eq(added.aLines, [], 'diff: 新增行 aLines=[]');
+  }
+
+  // 删除行：a\nDEL\nb → a\nb
+  {
+    const r = D.computeText('a\nDEL\nb', 'a\nb');
+    const types = r.map(b => b.type);
+    ok(types.includes('removed'), 'diff: 删除行包含 removed 块');
+    const removed = r.find(b => b.type === 'removed');
+    eq(removed.aLines, ['DEL'], 'diff: 删除行 aLines=[DEL]');
+    eq(removed.bLines, [], 'diff: 删除行 bLines=[]');
+  }
+
+  // 行号对齐验证：equal 块的 aStart/bStart 应连续递增
+  {
+    const r = D.computeText('l0\nl1\nl2\nl3', 'l0\nX\nl2\nl3');
+    // 期望：equal(l0) / changed(l1→X) / equal(l2,l3)
+    eq(r.length, 3, 'diff: 行号对齐 → 3 块');
+    eq(r[0].aStart, 0, 'diff: 块0 aStart=0');
+    eq(r[0].bStart, 0, 'diff: 块0 bStart=0');
+    eq(r[0].aEnd, 1, 'diff: 块0 aEnd=1');
+    eq(r[2].aStart, 2, 'diff: 块2 aStart=2 (跳过 changed)');
+    eq(r[2].bStart, 2, 'diff: 块2 bStart=2');
+  }
+
+  // summary 统计
+  {
+    const r = D.computeText('a\nb\nc', 'a\nX\nc\nD');
+    const s = D.summary(r);
+    ok(s.added >= 1, 'diff: summary added >= 1');
+    ok(s.removed >= 1, 'diff: summary removed >= 1');
+    ok(s.changed >= 1, 'diff: summary changed >= 1');
+  }
+
+  // summary 完全相同 → 全 0
+  {
+    const r = D.computeText('same\nsame', 'same\nsame');
+    const s = D.summary(r);
+    eq(s.added, 0, 'diff: summary 相同 added=0');
+    eq(s.removed, 0, 'diff: summary 相同 removed=0');
+    eq(s.changed, 0, 'diff: summary 相同 changed=0');
+  }
+
+  // 多行 changed 块（连续多行修改）
+  {
+    const r = D.computeText('a\nb\nc\nd', 'a\nB\nC\nd');
+    const changed = r.filter(b => b.type === 'changed');
+    ok(changed.length >= 1, 'diff: 连续多行修改至少 1 个 changed 块');
+    if (changed.length === 1) {
+      eq(changed[0].aLines.length, 2, 'diff: 连续 changed aLines=2');
+      eq(changed[0].bLines.length, 2, 'diff: 连续 changed bLines=2');
+    }
+  }
+
+  // added/removed 块的 aStart/bStart 对齐
+  {
+    const r = D.computeText('x\ny\nz', 'x\ny\nz\nNEW');
+    const added = r.find(b => b.type === 'added');
+    ok(added !== undefined, 'diff: 尾部新增有 added 块');
+    if (added) {
+      eq(added.aStart, 3, 'diff: 尾部新增 aStart=3 (A 行数)');
+      eq(added.aEnd, 3, 'diff: 尾部新增 aEnd=3');
+      eq(added.bStart, 3, 'diff: 尾部新增 bStart=3');
+      eq(added.bEnd, 4, 'diff: 尾部新增 bEnd=4');
+    }
+  }
+
+  // 性能冒烟：500 行 × 500 行
+  {
+    const a = Array.from({length: 500}, (_, i) => 'line ' + i);
+    const b = a.slice();
+    for (let i = 0; i < b.length; i += 7) b[i] = 'MOD ' + i;
+    const t0 = Date.now();
+    const r = D.compute(a, b);
+    const ms = Date.now() - t0;
+    ok(ms < 2000, 'diff: 500×500 耗时 ' + ms + 'ms (< 2s)');
+    ok(r.length > 1, 'diff: 500×500 结果 > 1 块');
+  }
 }
 
 console.log(`\n通过 ${pass} 项，失败 ${fail} 项`);
