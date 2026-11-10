@@ -24,6 +24,11 @@ contextBridge.exposeInMainWorld('notepadDesktop', {
   openFiles: () => ipcRenderer.invoke('file:open'),
   /** 按绝对路径读取（用于命令行参数 / "打开方式" / 二次启动） */
   readFile: (p) => ipcRenderer.invoke('file:read', p),
+  /**
+   * 同 readFile，但失败时不弹原生对话框，只回 {ok:false, error}。
+   * 预览里点一个失效的相对链接不该弹出模态框打断阅读。
+   */
+  readFileQuiet: (p) => ipcRenderer.invoke('file:readQuiet', p),
   /** 保存。path 为空则弹出原生另存为对话框。返回 {canceled} 或 {path,name} */
   saveFile: (payload) => ipcRenderer.invoke('file:save', payload),
   /**
@@ -52,5 +57,10 @@ contextBridge.exposeInMainWorld('notepadDesktop', {
 
   /* ------------------------------------------------------------------ 杂项 */
   revealInFolder: (p) => ipcRenderer.send('shell:reveal', p),
-  openExternal: (url) => ipcRenderer.send('shell:external', url)
+  openExternal: (url) => ipcRenderer.send('shell:external', url),
+  /**
+   * 用系统默认程序打开本地文件（.html → 浏览器、.pdf → 阅读器）。
+   * 返回 {ok, error}；与 openExternal 不同，这里需要知道结果才能提示用户。
+   */
+  openPath: (p) => ipcRenderer.invoke('shell:openPath', p)
 });

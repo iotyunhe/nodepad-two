@@ -279,6 +279,62 @@ ipcMain.handle('file:read', async (_e, p) => {
   }
 });
 
+/**
+ * 找出真实存在的文件路径。先按原样 stat；失败再做一次目录扫描兜底，
+ * 容忍这些在中文文档里很常见的偏差：
+ *   · 大小写不一致（Windows 不敏感，但跨平台仓库里常见）
+ *   · 全角字符 / 各种破折号（U+2010 ‐ U+2014 — U+FF0D － 混用）
+ *   · 尾部多打了一个空格
+ * 找不到返回 null。
+ */
+async function findExistingFile(p) {
+  try {
+    const st = await fsp.stat(p);
+    if (st.isFile()) return p;
+  } catch (e) { /* 继续兜底 */ }
+
+  const dir = path.dirname(p);
+  const want = path.basename(p);
+  let names;
+  try { names = await fsp.readdir(dir); } catch (e) { return null; }
+  const key = (s) => s.normalize('NFKC')
+    .replace(/[\u2010-\u2015\u2212\uFF0D]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  const k = key(want);
+  const hit = names.indexOf(want) >= 0 ? want : names.find((n) => key(n) === k);
+  return hit ? path.join(dir, hit) : null;
+}
+
+/**
+ * 预览内跳转专用：读不到只回错误串，不弹对话框。
+ * 相对链接写错、目标被删掉都很常见，弹模态框会打断阅读。
+ * input 可以是单个路径，也可以是候选路径数组（渲染进程会把「相对当前文件」
+ * 与「相对上层目录」两种解释都递过来），命中哪个就用哪个。
+ */
+ipcMain.handle('file:readQuiet', async (_e, input) => {
+  const list = (Array.isArray(input) ? input : [input]).filter((p) => typeof p === 'string' && p);
+  if (!list.length) return { ok: false, error: '路径为空', tried: [] };
+
+  for (const cand of list) {
+    const hit = await findExistingFile(cand);
+    if (!hit) continue;
+    try {
+      const st = await fsp.stat(hit);
+      if (!st.isFile()) continue;
+      // 大文件不在这一层拦：交给渲染进程的 largefile 分层处理
+      if (st.size > 200 * 1024 * 1024) return { ok: false, error: '文件过大（>200MB）', tried: list };
+      const data = await fsp.readFile(hit);
+      return {
+        ok: true, name: path.basename(hit), path: hit, matched: hit !== cand,
+        data: new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      };
+    } catch (e) { /* 换下一个候选 */ }
+  }
+  return { ok: false, error: '文件不存在', tried: list.slice(0, 4) };
+});
+
 ipcMain.handle('file:save', async (_e, payload) => {
   payload = payload || {};
   let target = payload.path;
@@ -335,6 +391,23 @@ ipcMain.on('app:confirmClose', () => {
 ipcMain.on('shell:reveal', (_e, p) => { if (p) shell.showItemInFolder(p); });
 ipcMain.on('shell:external', (_e, url) => {
   if (typeof url === 'string' && /^https?:/i.test(url)) shell.openExternal(url);
+});
+/**
+ * 用系统默认程序打开本地文件（Markdown 预览里普通点击本地链接走这里）。
+ * 同样支持候选数组；shell.openPath 成功返回空串、失败返回错误描述，
+ * 别把空串当失败。
+ */
+ipcMain.handle('shell:openPath', async (_e, input) => {
+  const list = (Array.isArray(input) ? input : [input]).filter((p) => typeof p === 'string' && p);
+  if (!list.length) return { ok: false, error: '路径为空' };
+  let hit = null;
+  for (const cand of list) {
+    hit = await findExistingFile(cand);
+    if (hit) break;
+  }
+  if (!hit) return { ok: false, error: '文件不存在' };
+  const err = await shell.openPath(hit);
+  return err ? { ok: false, error: err } : { ok: true, path: hit };
 });
 
 /* =========================================================== 退出 ========== */

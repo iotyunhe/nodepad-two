@@ -9,6 +9,7 @@ require(path.join(__dirname, '..', 'src', '30-folds.js'));
 require(path.join(__dirname, '..', 'src', '38-wrap.js'));
 require(path.join(__dirname, '..', 'src', '39-diff.js'));
 require(path.join(__dirname, '..', 'src', '60-search.js'));
+require(path.join(__dirname, '..', 'src', '45-markdown.js'));   // 纯字符串处理，不依赖 DOM
 
 let pass = 0, fail = 0;
 function eq(actual, expected, name) {
@@ -151,6 +152,55 @@ function ok(cond, name) { if (cond) pass++; else { fail++; console.error('✗ ' 
   ok(t6 - t5 < 200, '头部插入含索引重算在 200ms 内');
 }
 
+/* ------------------------------------------------- 标题锚点（GitHub 规则）
+ * 中文文档里的目录基本是手写的 [背景](#1-背景与设计目标)，
+ * slug 规则一旦和 GitHub 不一致，从 GitHub 复制过来的文档就点不动。 */
+{
+  const md = NT.markdown;
+  ok(!!md && typeof md.slugify === 'function', 'markdown 渲染器已加载');
+  eq(md.slugify('1. 背景与设计目标'), '1-背景与设计目标', '中文标题 slug');
+  eq(md.slugify('附录：关键决策与取舍'), '附录关键决策与取舍', '全角冒号剔除');
+  eq(md.slugify('A. 快速上手 **（重点）**'), 'a-快速上手-重点', '强调符与全角括号剔除');
+  eq(md.slugify('使用 `NT.util` 拼路径'), '使用-ntutil-拼路径', '行内代码只留文字');
+  eq(md.slugify('   '), 'section', '空标题兜底');
+
+  const html = md.render('## 1. 背景\n\n## 1. 背景');
+  eq(html.match(/id="[^"]+"/g), ['id="1-背景"', 'id="1-背景-1"'], '同名标题追加序号去重');
+  ok(/<h2 id="1-背景" data-line="0">/.test(html), '标题同时保留 data-line');
+}
+
+/* --------------------------------------------------- 内联 SVG 图形（拓朴图）
+ * 设计文档常把 <svg> 直接内联进 Markdown（GitHub 能渲染），
+ * 这里必须能画出来，且不能因此让 Markdown 有执行代码的能力。 */
+{
+  const svg = '<svg viewBox="0 0 10 10"><rect width="10" height="10"/>' +
+    '<text>中文标注</text></svg>';
+  const html = NT.markdown.render('前文\n\n' + svg + '\n\n后文');
+  ok(/<img class="md-svg"[^>]+data:image\/svg\+xml;base64,/.test(html), '裸 <svg> 块渲染成图片');
+  ok(html.indexOf('&lt;svg') === -1, '不再把 SVG 当文本转义');
+  eq(html.split('<img').length - 1, 1, '只产出一张图');
+  ok(/<p[^>]*>前文<\/p>/.test(html) && /<p[^>]*>后文<\/p>/.test(html), 'SVG 前后的段落保持原样');
+
+  // base64 必须能还原出带中文的原文（btoa 遇中文会抛，说明用的是自己的编码器）
+  const b64 = /base64,([A-Za-z0-9+/=]+)/.exec(html)[1];
+  eq(Buffer.from(b64, 'base64').toString('utf8'), svg, 'base64 往返无损（含中文）');
+
+  // ```svg 围栏同样出图，且不再显示成代码块
+  const fenced = NT.markdown.render('```svg\n<svg xmlns="http://www.w3.org/2000/svg"></svg>\n```');
+  ok(/<img class="md-svg"/.test(fenced), '```svg 围栏渲染成图片');
+  ok(fenced.indexOf('<pre') === -1, '```svg 不再输出代码块');
+
+  // 只贴了一半（没有 </svg>）→ 退回代码块，不吞内容
+  const broken = NT.markdown.render('<svg viewBox="0 0 4 4">\n  <rect/>');
+  ok(/<pre class="md-code"/.test(broken) && broken.indexOf('&lt;svg') >= 0, '未闭合的 SVG 退回代码块');
+
+  // 其他 HTML 依旧一律转义 —— SVG 是唯一例外，不能顺手把 <script> 也放开
+  const evil = NT.markdown.render('<script>alert(1)</script>');
+  ok(evil.indexOf('<script>') === -1 && evil.indexOf('&lt;script&gt;') >= 0, '<script> 仍被转义');
+  const fakeImg = NT.markdown.render('<svg onload="alert(1)"><rect/></svg>');
+  ok(fakeImg.indexOf('onload="alert') === -1, 'SVG 里的 onload 不会出现在 DOM 属性上');
+}
+
 /* ------------------------------------------------------------ 语言识别 */
 {
   eq(NT.util.langFromPath('a/b/c.js'), 'javascript', 'js 识别');
@@ -158,6 +208,46 @@ function ok(cond, name) { if (cond) pass++; else { fail++; console.error('✗ ' 
   eq(NT.util.langFromPath('x.tsx'), 'typescript', 'tsx 识别');
   eq(NT.util.langFromPath('README.md'), 'markdown', 'markdown 识别');
   eq(NT.util.langFromPath('noext'), 'plaintext', '无扩展名兜底');
+}
+
+/* ------------------------------------------------------ 本地路径解析（预览链接）
+ * 渲染进程没有 node 的 path，Markdown 相对链接要靠这套函数拼绝对路径：
+ * 拼错一个分隔符就变成「打不开」，所以这里按平台逐条钉死。 */
+{
+  const u = NT.util;
+  // 取目录
+  eq(u.dirOf('C:\\work\\docs\\a.md'), 'C:\\work\\docs', 'dirOf: Windows 多层');
+  eq(u.dirOf('C:\\a.md'), 'C:\\', 'dirOf: 盘符根目录');
+  eq(u.dirOf('/home/u/a.md'), '/home/u', 'dirOf: POSIX');
+  eq(u.dirOf('a.md'), '', 'dirOf: 无目录返回空');
+
+  // 是否绝对
+  ok(u.isAbsolutePath('D:/x/a.md'), 'isAbsolutePath: 正斜杠盘符');
+  ok(u.isAbsolutePath('\\\\srv\\share\\a.md'), 'isAbsolutePath: UNC');
+  ok(u.isAbsolutePath('/usr/a.md'), 'isAbsolutePath: POSIX 根');
+  ok(!u.isAbsolutePath('docs/a.md'), 'isAbsolutePath: 相对路径');
+
+  // 归一化
+  eq(u.normalizePath('C:\\a\\..\\b\\.\\c.md'), 'C:\\b\\c.md', 'normalize: 折叠 . 与 ..');
+  eq(u.normalizePath('C:\\a\\\\\\b.md'), 'C:\\a\\b.md', 'normalize: 合并重复分隔符');
+  eq(u.normalizePath('/a/./b/../c.md'), '/a/c.md', 'normalize: POSIX 折叠');
+  eq(u.normalizePath('../a.md'), '../a.md', 'normalize: 保留开头的 ..');
+
+  // 拼接
+  eq(u.resolveLinkPath('C:\\work\\docs\\index.md', '01-设计方案.md'),
+    'C:\\work\\docs\\01-设计方案.md', 'resolve: 同级中文文件名');
+  eq(u.resolveLinkPath('C:\\work\\docs\\index.md', '../assets/a.png'),
+    'C:\\work\\assets\\a.png', 'resolve: 上一级');
+  eq(u.resolveLinkPath('C:\\work\\docs\\index.md', 'sub/x.md'),
+    'C:\\work\\docs\\sub\\x.md', 'resolve: 子目录');
+  eq(u.resolveLinkPath('C:\\work\\docs\\index.md', 'D:\\other\\a.md'),
+    'D:\\other\\a.md', 'resolve: 绝对路径原样归一');
+  eq(u.resolveLinkPath('/home/u/docs/a.md', '../b.md'),
+    '/home/u/b.md', 'resolve: POSIX 上一级');
+
+  // 同一文件判定（路径去重/切标签依赖它）
+  ok(u.samePath('C:\\Work\\Docs\\A.md', 'c:/work/docs/a.md'), 'samePath: 大小写与分隔符无关');
+  ok(!u.samePath('C:\\work\\a.md', 'C:\\work\\b.md'), 'samePath: 不同文件为 false');
 }
 
 /* ------------------------------------------------------------ 分词器 */

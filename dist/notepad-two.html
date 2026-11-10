@@ -686,7 +686,7 @@ html[data-theme="dark"] .diff-row-empty { background: var(--bg-alt); }
 .orow textarea:focus { outline: none; border-color: var(--accent); }
 
 </style>
-<script>window.__NT_CHANGELOG__ = "# 更新日志\n\n本项目的版本号遵循 `主版本.次版本.补丁`：\n\n- 修复缺陷 / 文案与配置调整 → 补丁位 +1\n- 新增向后兼容的功能 → 次版本 +1，补丁位归零\n- 不兼容的改动 → 主版本 +1，其余归零\n\n每次发版都会打同名 git 标签（`v1.1.1` 等），`git tag -l` 可查。\n\n---\n\n## [1.3.0] — 2026-11-09\n\n### 新增\n- **文本对比（diff viewer）**。在「搜索」菜单新增「文本对比…」，快捷键 `Ctrl+Alt+D`。\n  - 支持两种来源：从已打开的标签页选择 A/B，或直接粘贴两段文本。\n  - 双栏并排显示，差异行按类型高亮：新增（绿底）、删除（红底）、修改（黄底）。\n  - 每个差异块带 **←A** 和 **B→** 按钮，逐处选择保留 A 还是 B 的内容。\n  - 差异导航：工具栏「↑/↓」按钮跳转到上一个/下一个差异（`Alt+Shift+←/→`）。\n  - 「应用到当前文档」将所有已选择的差异合并为一个新标签页输出。\n  - `Esc` 关闭对比视图。\n- 新增 `src/39-diff.js`：基于 LCS 的行级差异计算，纯函数，零 DOM 依赖。\n- `form()` 对话框增强：支持 `type: 'textarea'` 字段和 `showKey`/`showVal` 联动显隐。\n\n### 测试\n- `test/core.test.js` 新增 47 项 diff 算法测试（166 项 → 全绿）。\n\n---\n\n## [1.2.0] — 2026-10-27\n\n### 新增\n- **自动换行（soft wrap）**。此前 `wordWrap` 只是一个没有界面入口的死配置项，\n  粘贴长行只能横向滚动，编辑菜单里也找不到开关 —— 这个能力确实是缺的，不是藏得深。\n  - 编辑菜单新增 **自动换行**，快捷键 `Alt+Z`（与 Notepad++ 一致），带勾选状态。\n  - 状态栏常驻一个可点击的「自动换行 / 不换行」指示，不必再翻菜单。\n  - 默认开启；老配置里那个从未生效过的 `false` 通过一次性迁移统一打开。\n  - 长行按词边界折行，行尾空白悬挂；超长无空格串按字符硬切；制表符按 tab-stop 展开；\n    CJK / 全角字符按真实宽度参与排版。\n  - 折行后行号只标在首行，行号块高度随折行数增长，当前行底色也覆盖整个折行块。\n- 新增 `src/38-wrap.js`：纯函数折行排版计算，无 DOM 依赖，可在 Node 里直接单测。\n- 新增 `test/cdp-wrap-check.js`：用 CDP 驱动真实 Chrome 校验折行的几何对齐（23 项）。\n- 新增 `test/cdp-browser-test.js`：用 CDP 跑 `test/browser.test.html`（Chrome 132+\n  已移除 `--virtual-time-budget`，无头跑法只能走这条路）。\n- 新增 `test/diag-edit-perf.js`：拆分统计超大文件上一次编辑各环节的耗时。\n\n### 修复\n- 折行位置的计算精度：最初按「一行能放多少个等宽字符」推算，实测发现等宽字体里\n  CJK 的步进并不等于窄字符的两倍（Cascadia Mono 13px：7.617px / 14px），\n  按列算会系统性高估宽字符宽度、多算一行，导致高亮层与输入框错位。\n  改为**像素模型**，宽度由隐藏探针从 DOM 实测；渲染后再读一次真实行高做校正兜底。\n- 单字符宽度改用 DOM 实测而非 `canvas.measureText`，两者有零点几像素的差异，\n  累到几十列之后足以让折行点算错。\n\n### 性能\n- 不换行时**完全不建折行索引**（位置纯算术得出）。初版在非换行模式下也维护了\n  一张「行 → 顶部 Y」表，百万行文件每敲一个键重建一次，实测让编辑退化了两个数量级。\n\n### 已知限制\n- 超大文件（默认 > 12 万行或 > 4 MB）会进入轻量模式，自动换行随之关闭 ——\n  逐行排版在那个体量上会明显拖慢滚动。\n- 「透明 textarea 叠加」架构下，超大文件上的**命令式编辑**（撤销、宏、批量替换等）\n  要把光标同步回 37 MB 的 textarea，Chrome 的 `setSelectionRange` 在这个体量上是\n  O(value 长度)，单次可达十几秒。普通打字走 `input` 事件、由浏览器自己维护选区，\n  不受影响。这是既有问题，与本次改动无关，详见 `test/diag-edit-perf.js`。\n\n---\n\n## [1.1.4] — 2026-10-19\n\n### 新增\n- `scripts/publish-release.js`：一条命令把 `release/` 里的安装包发布到 GitHub Releases。\n  自动识别仓库与版本、从本文件抽取对应版本的说明作为 Release 正文，\n  支持 `--dry-run`（只看流程）与 `--draft`（先存草稿）。\n  因为 Release 走 REST API，**必须用 Personal Access Token**，\n  git 使用的 SSH 密钥对 API 无效。\n\n### 变更\n- `desktop/package.json` 增加 `npm run publish:release` 快捷方式。\n\n---\n\n## [1.1.3] — 2026-10-19\n\n### 新增\n- 新增 [LICENSE](LICENSE)（MIT）与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)：\n  列明随安装包分发的 Electron / Chromium / Node.js / V8 / FFmpeg / ICU / ANGLE，\n  以及构建期使用的 electron-builder / NSIS / WiX / 7-Zip 的版本、许可证与项目地址。\n- 程序内新增 **帮助 → 开源许可**，构建时把上述声明注入产物后渲染展示。\n\n### 变更\n- README 补充仓库地址、克隆命令与「开源声明」章节；安装包文件名统一到当前版本。\n\n---\n\n## [1.1.2] — 2026-10-19\n\n### 新增\n- 新增本文件 `CHANGELOG.md`，补齐 1.0.0 以来的全部版本记录。\n- 程序内新增 **帮助 → 更新日志**，弹层直接渲染本文件内容。\n  构建时由 `build.py` 把 `CHANGELOG.md` 注入产物，仓库文档与界面永远是同一份数据，不会出现两边不一致。\n\n### 变更\n- README 的「当前版本」改为跟踪最新版本，并链接到本文件。\n\n---\n\n## [1.1.1] — 2026-10-19\n\n### 变更\n- 右侧插件/宏/统计面板**默认收起**，只保留一条 22px 的竖向把手（竖排「面板」字样 + 箭头）。\n- 点击把手或按 `Ctrl+B` 可平滑展开/收起（160ms 宽度过渡），收起后完全不占编辑区宽度。\n- 老配置做一次性迁移：升级后原来的「展开」状态会被收起来一次，之后手动展开的选择正常记住。\n\n### 修复\n- 收起态残留 1px 分隔线导致布局轻微偏移。\n\n---\n\n## [1.1.0] — 2026-10-19\n\n### 新增\n- **打开 `.md` 自动进入分栏预览**：左源码、右渲染，分隔条可拖动调宽度。\n- 设置项 `mdAutoPreview`（默认开启），菜单入口「视图 → 打开 Markdown 时自动分栏」。\n- 超过 2 MB 或处于轻量模式的 Markdown 文件不自动渲染，避免卡顿。\n- 每个标签页各自记住视图状态（编辑 / 分栏 / 阅读），手动切回编辑不会被覆盖。\n\n### 修复\n- `bump-version.js` 中输出目录同步正则括号错位导致脚本语法错误。\n- 升级版本号时构建输出目录不同步（仍指向旧版本目录）。\n\n### 文档\n- README 新增「Markdown 文档」章节：三种视图、格式快捷键、支持的语法、安全说明。\n\n---\n\n## [1.0.2] — 2026-10-19\n\n### 修复\n- **复制粘贴不可用**：`desktop/main.js` 的权限处理器对所有请求一律拒绝，连带拦截了剪贴板 API。\n  现改为仅放行 `clipboard-read` / `clipboard-write` / `clipboard-sanitized-write`，\n  摄像头、麦克风、通知、定位等仍拒绝。\n- 复制/粘贴失败的提示文案去掉了误导性的「请授权剪贴板权限」。\n\n---\n\n## [1.0.1] — 2026-10-16\n\n### 修复\n- **MSI 在 per-user 安装模式下无法自选安装路径**：安装范围页的「下一步」直接跳到\n  「准备安装」，跳过了目录选择页。修正模板中两条互斥 `ControlEvent` 的目标，\n  并让目录页的「上一步」回到安装范围页。\n\n### 新增\n- `bump-version.js`：一条命令同步 `desktop/package.json` 与 `src/00-core.js` 的版本号，\n  支持 `patch|minor|major|X.Y.Z` 与 `--check` 校验。\n- `build.py` 构建时从 `package.json` 注入 `NT.version`，交付产物的版本号不再依赖手工同步。\n\n### 变更\n- 构建输出改到工作区外的 `../../notepad-two-dist/<version>`，仓库不再堆积构建产物。\n- 工作区产物整理：只保留 `release/` 一个交付目录。\n\n### 测试\n- 新增 MSI 目录页链路断言（`verify-installer-zh.py` 19 → 23 项）。\n- 新增版本号一致性断言（`core.test.js` 87 → 89 项）。\n\n---\n\n## [1.0.0] — 2026-10-15\n\n### 首个版本\n\n- **编辑内核**：行数组缓冲 + 惰性偏移索引、透明 textarea + 高亮覆盖层、可见行虚拟化。\n- **多标签页**：新建 / 关闭 / 拖拽排序 / 双击重命名 / 中键关闭 / 脏标记。\n- **语法高亮**：19 种语言（JS/TS/Python/HTML/XML/CSS/JSON/Markdown/C/C++/Java/C#/Go/Rust/SQL/Shell/YAML/INI/纯文本）。\n- **代码折叠**：括号配对 + 缩进层级 + `region` 标记，支持按层级折叠。\n- **自动补全**：关键字 / 类型 / 内置 API / 文档词 / 代码片段，支持插件扩展。\n- **查找替换**：正则、大小写、全词、选区内、`$1` 反向引用、全部替换可一次撤销。\n- **宏录制回放**：录制语义化命令，可命名 / 导出 / 导入，整段可撤销。\n- **插件机制**：9 个扩展点 + 生命周期管理 + 源码热加载，内置 5 个插件。\n- **大文件**：分片流式读取、三档性能自适应降级、虚拟化渲染。\n- **Markdown**：自研纯函数渲染器（零依赖、默认不透传原始 HTML），分栏 / 阅读 / 导出 HTML。\n- **中文化交付**：NSIS 与 MSI 安装向导全中文，程序默认语言 `zh-CN`。\n";</script>
+<script>window.__NT_CHANGELOG__ = "# 更新日志\n\n本项目的版本号遵循 `主版本.次版本.补丁`：\n\n- 修复缺陷 / 文案与配置调整 → 补丁位 +1\n- 新增向后兼容的功能 → 次版本 +1，补丁位归零\n- 不兼容的改动 → 主版本 +1，其余归零\n\n每次发版都会打同名 git 标签（`v1.1.1` 等），`git tag -l` 可查。\n\n---\n\n## [1.4.0] — 2026-11-10\n\n本次重心是「阅读模式真正能当文档看」：链接可点、目录可跳、图能显示、快捷键不再挑焦点。\n\n### 新增\n- **Markdown 预览内的本地链接跳转**。`docs/01-设计方案.md` 这类相对路径不再只是死文本：\n  - `Ctrl` / `⌘` + 点击 → 在编辑器内打开；该文件已有标签页则直接切过去，不重复开。\n  - 普通点击 → 交给系统默认程序（`.html` 进浏览器、`.pdf` 进阅读器）。\n  - `https://…` 仍走系统浏览器；二进制后缀（png / pdf / zip / docx…）即便按 Ctrl 也走系统程序。\n  - 悬停提示 `Ctrl+点击在编辑器中打开 · 点击用系统程序打开`，不用猜。\n- **页内锚点跳转**。手写目录 `[背景与设计目标](#1-背景与设计目标)` 现在能点了：\n  - 标题自动生成 **GitHub / VSCode 同款 slug**（`## 1. 背景与设计目标` → `id=\"1-背景与设计目标\"`），\n    同名标题追加 `-1` / `-2`，从 GitHub 复制来的文档不用改。\n  - 精确 id 匹配不到时按「去标点 / 忽略大小写 / 折叠空格」再兜底一轮；\n    找不到会明确提示\"锚点不存在，可能标题改了名\"，而不是点了没反应。\n  - 落点距顶部留 12px，目标标题闪一下高亮；分栏模式下编辑器同步滚到同一行。\n- **内联 SVG 图形渲染**。设计文档常把 `<svg>` 直接内联进 Markdown（GitHub 可渲染），\n  此前会被转义成一大坨源码。现在裸 `<svg>…<\/svg>` 块与 ` ```svg ` 围栏都能出图：\n  - 图形以 `data:image/svg+xml;base64,…` 的 `<img>` 呈现，**图片上下文不执行脚本、\n    不加载外部资源**，等于自带沙箱，不为了画图把 XSS 口子打开。\n  - 未闭合的 SVG 或超过 800KB 的极端尺寸退回代码块，不吞内容；其他 HTML 仍然一律转义。\n  - 导出的 HTML 也因此能离线看图（图即 data URI，不依赖外部文件）。\n\n### 修复\n- **阅读模式下所有快捷键失效**。此前快捷键只在编辑器文本框里监听，切到「阅读」后焦点在\n  预览区，`Ctrl+O` / `Ctrl+S` / `Ctrl+F` 全部按了没反应。现在补了一层全局兜底，\n  并划清边界：编辑器已处理的键不重复执行；对话框打开时不抢键；焦点在其他输入框里时\n  只认打开/保存/命令面板这类真正全局的命令（`Ctrl+C` 不会被劫持去复制编辑器内容）。\n- **拖放打开的文件丢失真实路径**。拖进窗口的文件 `doc.path` 只停在文件名，\n  导致相对链接解析不出目录、`Ctrl+S` 退化成\"另存为\"。现在用 `webUtils` 反查真实路径回填。\n- **链接解析兜底**。文档里写 `docs/xx.md` 时作者往往想的是工程根，\n  而当前文件可能就在子目录里（会拼成 `docs/docs/xx.md`）。现在逐级向上最多试 4 层，\n  并在精确路径失败后按名字做归一化匹配（大小写、全角、各类破折号、尾部空格）。\n  失败提示会带上实际尝试过的绝对路径，命中兜底时也会说明实际指向。\n\n### 测试\n- `test/core.test.js` 166 → **203 项**：新增 19 项路径函数用例、8 项 slug 用例、10 项 SVG 用例。\n- 新增 `test/cdp-preview-link.js`（**32 项**）：在真实产物里验证链接跳转、锚点滚动、\n  阅读模式 `Ctrl+O`、输入框不被劫持、SVG 真解码出图形。\n- 新增 `test/electron-preview-link.js`（**10 项**）：连真实 Electron IPC 真读盘，\n  覆盖中文文件名。\n- `test/cdp-browser-test.js` **94 项**回归全绿。\n\n---\n\n## [1.3.0] — 2026-11-09\n\n### 新增\n- **文本对比（diff viewer）**。在「搜索」菜单新增「文本对比…」，快捷键 `Ctrl+Alt+D`。\n  - 支持两种来源：从已打开的标签页选择 A/B，或直接粘贴两段文本。\n  - 双栏并排显示，差异行按类型高亮：新增（绿底）、删除（红底）、修改（黄底）。\n  - 每个差异块带 **←A** 和 **B→** 按钮，逐处选择保留 A 还是 B 的内容。\n  - 差异导航：工具栏「↑/↓」按钮跳转到上一个/下一个差异（`Alt+Shift+←/→`）。\n  - 「应用到当前文档」将所有已选择的差异合并为一个新标签页输出。\n  - `Esc` 关闭对比视图。\n- 新增 `src/39-diff.js`：基于 LCS 的行级差异计算，纯函数，零 DOM 依赖。\n- `form()` 对话框增强：支持 `type: 'textarea'` 字段和 `showKey`/`showVal` 联动显隐。\n\n### 测试\n- `test/core.test.js` 新增 47 项 diff 算法测试（166 项 → 全绿）。\n\n---\n\n## [1.2.0] — 2026-10-27\n\n### 新增\n- **自动换行（soft wrap）**。此前 `wordWrap` 只是一个没有界面入口的死配置项，\n  粘贴长行只能横向滚动，编辑菜单里也找不到开关 —— 这个能力确实是缺的，不是藏得深。\n  - 编辑菜单新增 **自动换行**，快捷键 `Alt+Z`（与 Notepad++ 一致），带勾选状态。\n  - 状态栏常驻一个可点击的「自动换行 / 不换行」指示，不必再翻菜单。\n  - 默认开启；老配置里那个从未生效过的 `false` 通过一次性迁移统一打开。\n  - 长行按词边界折行，行尾空白悬挂；超长无空格串按字符硬切；制表符按 tab-stop 展开；\n    CJK / 全角字符按真实宽度参与排版。\n  - 折行后行号只标在首行，行号块高度随折行数增长，当前行底色也覆盖整个折行块。\n- 新增 `src/38-wrap.js`：纯函数折行排版计算，无 DOM 依赖，可在 Node 里直接单测。\n- 新增 `test/cdp-wrap-check.js`：用 CDP 驱动真实 Chrome 校验折行的几何对齐（23 项）。\n- 新增 `test/cdp-browser-test.js`：用 CDP 跑 `test/browser.test.html`（Chrome 132+\n  已移除 `--virtual-time-budget`，无头跑法只能走这条路）。\n- 新增 `test/diag-edit-perf.js`：拆分统计超大文件上一次编辑各环节的耗时。\n\n### 修复\n- 折行位置的计算精度：最初按「一行能放多少个等宽字符」推算，实测发现等宽字体里\n  CJK 的步进并不等于窄字符的两倍（Cascadia Mono 13px：7.617px / 14px），\n  按列算会系统性高估宽字符宽度、多算一行，导致高亮层与输入框错位。\n  改为**像素模型**，宽度由隐藏探针从 DOM 实测；渲染后再读一次真实行高做校正兜底。\n- 单字符宽度改用 DOM 实测而非 `canvas.measureText`，两者有零点几像素的差异，\n  累到几十列之后足以让折行点算错。\n\n### 性能\n- 不换行时**完全不建折行索引**（位置纯算术得出）。初版在非换行模式下也维护了\n  一张「行 → 顶部 Y」表，百万行文件每敲一个键重建一次，实测让编辑退化了两个数量级。\n\n### 已知限制\n- 超大文件（默认 > 12 万行或 > 4 MB）会进入轻量模式，自动换行随之关闭 ——\n  逐行排版在那个体量上会明显拖慢滚动。\n- 「透明 textarea 叠加」架构下，超大文件上的**命令式编辑**（撤销、宏、批量替换等）\n  要把光标同步回 37 MB 的 textarea，Chrome 的 `setSelectionRange` 在这个体量上是\n  O(value 长度)，单次可达十几秒。普通打字走 `input` 事件、由浏览器自己维护选区，\n  不受影响。这是既有问题，与本次改动无关，详见 `test/diag-edit-perf.js`。\n\n---\n\n## [1.1.4] — 2026-10-19\n\n### 新增\n- `scripts/publish-release.js`：一条命令把 `release/` 里的安装包发布到 GitHub Releases。\n  自动识别仓库与版本、从本文件抽取对应版本的说明作为 Release 正文，\n  支持 `--dry-run`（只看流程）与 `--draft`（先存草稿）。\n  因为 Release 走 REST API，**必须用 Personal Access Token**，\n  git 使用的 SSH 密钥对 API 无效。\n\n### 变更\n- `desktop/package.json` 增加 `npm run publish:release` 快捷方式。\n\n---\n\n## [1.1.3] — 2026-10-19\n\n### 新增\n- 新增 [LICENSE](LICENSE)（MIT）与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)：\n  列明随安装包分发的 Electron / Chromium / Node.js / V8 / FFmpeg / ICU / ANGLE，\n  以及构建期使用的 electron-builder / NSIS / WiX / 7-Zip 的版本、许可证与项目地址。\n- 程序内新增 **帮助 → 开源许可**，构建时把上述声明注入产物后渲染展示。\n\n### 变更\n- README 补充仓库地址、克隆命令与「开源声明」章节；安装包文件名统一到当前版本。\n\n---\n\n## [1.1.2] — 2026-10-19\n\n### 新增\n- 新增本文件 `CHANGELOG.md`，补齐 1.0.0 以来的全部版本记录。\n- 程序内新增 **帮助 → 更新日志**，弹层直接渲染本文件内容。\n  构建时由 `build.py` 把 `CHANGELOG.md` 注入产物，仓库文档与界面永远是同一份数据，不会出现两边不一致。\n\n### 变更\n- README 的「当前版本」改为跟踪最新版本，并链接到本文件。\n\n---\n\n## [1.1.1] — 2026-10-19\n\n### 变更\n- 右侧插件/宏/统计面板**默认收起**，只保留一条 22px 的竖向把手（竖排「面板」字样 + 箭头）。\n- 点击把手或按 `Ctrl+B` 可平滑展开/收起（160ms 宽度过渡），收起后完全不占编辑区宽度。\n- 老配置做一次性迁移：升级后原来的「展开」状态会被收起来一次，之后手动展开的选择正常记住。\n\n### 修复\n- 收起态残留 1px 分隔线导致布局轻微偏移。\n\n---\n\n## [1.1.0] — 2026-10-19\n\n### 新增\n- **打开 `.md` 自动进入分栏预览**：左源码、右渲染，分隔条可拖动调宽度。\n- 设置项 `mdAutoPreview`（默认开启），菜单入口「视图 → 打开 Markdown 时自动分栏」。\n- 超过 2 MB 或处于轻量模式的 Markdown 文件不自动渲染，避免卡顿。\n- 每个标签页各自记住视图状态（编辑 / 分栏 / 阅读），手动切回编辑不会被覆盖。\n\n### 修复\n- `bump-version.js` 中输出目录同步正则括号错位导致脚本语法错误。\n- 升级版本号时构建输出目录不同步（仍指向旧版本目录）。\n\n### 文档\n- README 新增「Markdown 文档」章节：三种视图、格式快捷键、支持的语法、安全说明。\n\n---\n\n## [1.0.2] — 2026-10-19\n\n### 修复\n- **复制粘贴不可用**：`desktop/main.js` 的权限处理器对所有请求一律拒绝，连带拦截了剪贴板 API。\n  现改为仅放行 `clipboard-read` / `clipboard-write` / `clipboard-sanitized-write`，\n  摄像头、麦克风、通知、定位等仍拒绝。\n- 复制/粘贴失败的提示文案去掉了误导性的「请授权剪贴板权限」。\n\n---\n\n## [1.0.1] — 2026-10-16\n\n### 修复\n- **MSI 在 per-user 安装模式下无法自选安装路径**：安装范围页的「下一步」直接跳到\n  「准备安装」，跳过了目录选择页。修正模板中两条互斥 `ControlEvent` 的目标，\n  并让目录页的「上一步」回到安装范围页。\n\n### 新增\n- `bump-version.js`：一条命令同步 `desktop/package.json` 与 `src/00-core.js` 的版本号，\n  支持 `patch|minor|major|X.Y.Z` 与 `--check` 校验。\n- `build.py` 构建时从 `package.json` 注入 `NT.version`，交付产物的版本号不再依赖手工同步。\n\n### 变更\n- 构建输出改到工作区外的 `../../notepad-two-dist/<version>`，仓库不再堆积构建产物。\n- 工作区产物整理：只保留 `release/` 一个交付目录。\n\n### 测试\n- 新增 MSI 目录页链路断言（`verify-installer-zh.py` 19 → 23 项）。\n- 新增版本号一致性断言（`core.test.js` 87 → 89 项）。\n\n---\n\n## [1.0.0] — 2026-10-15\n\n### 首个版本\n\n- **编辑内核**：行数组缓冲 + 惰性偏移索引、透明 textarea + 高亮覆盖层、可见行虚拟化。\n- **多标签页**：新建 / 关闭 / 拖拽排序 / 双击重命名 / 中键关闭 / 脏标记。\n- **语法高亮**：19 种语言（JS/TS/Python/HTML/XML/CSS/JSON/Markdown/C/C++/Java/C#/Go/Rust/SQL/Shell/YAML/INI/纯文本）。\n- **代码折叠**：括号配对 + 缩进层级 + `region` 标记，支持按层级折叠。\n- **自动补全**：关键字 / 类型 / 内置 API / 文档词 / 代码片段，支持插件扩展。\n- **查找替换**：正则、大小写、全词、选区内、`$1` 反向引用、全部替换可一次撤销。\n- **宏录制回放**：录制语义化命令，可命名 / 导出 / 导入，整段可撤销。\n- **插件机制**：9 个扩展点 + 生命周期管理 + 源码热加载，内置 5 个插件。\n- **大文件**：分片流式读取、三档性能自适应降级、虚拟化渲染。\n- **Markdown**：自研纯函数渲染器（零依赖、默认不透传原始 HTML），分栏 / 阅读 / 导出 HTML。\n- **中文化交付**：NSIS 与 MSI 安装向导全中文，程序默认语言 `zh-CN`。\n";</script>
 <script>window.__NT_NOTICES__ = "# 第三方组件与开源声明\n\nNotepad Two 的**应用源代码**（`src/`、`desktop/main.js`、`desktop/preload.js`、\n`build.py`、`test/` 等）由本项目原创，以 [MIT 许可证](LICENSE) 发布。\n\n下面是本项目**使用或随安装包分发**的第三方组件。它们各自遵循自己的许可证，\n本项目不对其主张任何权利。\n\n---\n\n## 一、随安装包分发的运行时组件\n\n安装后的程序目录（`win-unpacked/`）本质上是一个 Electron 应用，\n其中绝大部分二进制文件来自 Electron 及其内置的 Chromium / Node.js。\n\n| 组件 | 版本 | 许可证 | 项目地址 |\n| --- | --- | --- | --- |\n| Electron | 38.8.6 | MIT | https://github.com/electron/electron |\n| Chromium | 140.0.7339.249 | BSD 3-Clause（另含众多第三方许可，见其 `LICENSE` 文件） | https://www.chromium.org/ |\n| Node.js | 随 Electron 内置 | MIT | https://nodejs.org/ |\n| V8 | 随 Chromium 内置 | BSD 3-Clause | https://v8.dev/ |\n| ICU（`icudtl.dat`） | 随 Chromium 内置 | Unicode / ICU License | https://icu.unicode.org/ |\n| ANGLE（`libEGL.dll` / `libGLESv2.dll`） | 随 Chromium 内置 | BSD 3-Clause | https://chromium.googlesource.com/angle/angle |\n| FFmpeg（`ffmpeg.dll`） | Electron 官方构建 | LGPL 2.1 | https://ffmpeg.org/ |\n| zlib / libpng / 其他 Chromium 依赖 | 随 Chromium 内置 | 各自许可（zlib、libpng 等） | https://chromium.googlesource.com/chromium/src/+/main/third_party |\n| DirectX Shader Compiler（`dxcompiler.dll` / `dxil.dll`） | 随 Chromium 内置 | MIT | https://github.com/microsoft/DirectXShaderCompiler |\n\n> Electron 的完整第三方许可清单可查阅其发行包内的 `LICENSE` 与\n> `LICENSES.chromium.html`。安装后位于程序目录下（若发行包未附带该文件，\n> 可在 https://github.com/electron/electron/blob/main/LICENSE 查看）。\n\n## 二、构建期使用、不随程序安装的工具\n\n这些工具只在打包阶段运行，产物中不包含它们的可执行文件\n（NSIS 生成的安装器存根除外，见下）。\n\n| 工具 | 版本 | 许可证 | 用途 |\n| --- | --- | --- | --- |\n| electron-builder | 26.15.3 | MIT | 生成 NSIS / MSI 安装包 |\n| NSIS | 3.x（由 electron-builder 内置） | zlib/libpng License | `Setup.exe` 安装器（存根代码随安装器分发） |\n| WiX Toolset | 4.0.0.5512.2 | MS-RL | 生成 `.msi` 安装包 |\n| 7-Zip | 由 electron-builder 内置 | LGPL 2.1（含 unRAR 限制条款） | 解压 Electron 发行包 |\n| app-builder-bin | 随 electron-builder | MIT | 打包辅助程序 |\n\nNSIS 许可证：https://nsis.sourceforge.io/License\nWiX Toolset 许可证：https://wixtoolset.org/about/license/\n\n## 三、明确没有使用的项目\n\n为了避免误解，这里说明几个「看起来可能用了、实际没有」的情况：\n\n- **没有引入任何前端框架**（React / Vue / Svelte 等），界面全部由原生 DOM 构建。\n- **没有引入编辑器组件**（CodeMirror / Monaco / Ace），编辑器内核（行缓冲、\n  分词高亮、折叠、补全、虚拟化渲染）为自行实现。\n- **没有引入 Markdown 库**（marked / markdown-it / remark），\n  `src/45-markdown.js` 是自研的纯函数渲染器，且默认不透传原始 HTML。\n- **没有引入语法高亮库**（highlight.js / Prism），`src/20-languages.js`\n  中的规则表为自行编写。\n- **运行时没有任何 npm 依赖**：`desktop/package.json` 的 `dependencies` 为空，\n  `electron` 与 `electron-builder` 仅作为开发依赖存在。\n\n## 四、对 electron-builder 模板的修改\n\n`desktop/patch-builder-templates.js` 会在 `postinstall` 阶段修改\n`node_modules/app-builder-lib/templates/` 下的 NSIS 消息表与 MSI 模板 XML，\n目的是让安装向导显示简体中文、并修复 per-user 安装跳过目录选择页的问题。\n\n这些模板文件仍属 electron-builder 项目（MIT），本项目仅在使用侧做本地修改，\n不重新分发其源码。\n\n---\n\n如果你认为本项目遗漏了某个应当署名的组件，欢迎提 issue 指出。\n";</script>
 </head>
 <body>
@@ -734,7 +734,7 @@ html[data-theme="dark"] .diff-row-empty { background: var(--bg-alt); }
    *   · 改版本请用 `node bump-version.js patch|minor|major|X.Y.Z`（会同时改这里）；
    *   · build.py 打包时还会用 package.json 覆盖此字面量，确保交付产物一定正确；
    *   · core.test.js 有一条断言校验此处与 package.json 一致，漂移会被测出来。*/
-  NT.version = '1.3.0';
+  NT.version = '1.4.0';
 
   /* ------------------------------------------------------------------ 事件总线
    * 全局单例。约定的事件名（节选）：
@@ -853,6 +853,77 @@ html[data-theme="dark"] .diff-row-empty { background: var(--bg-alt); }
         if (l.ext && l.ext.indexOf(ext) >= 0) return id;
       }
       return 'plaintext';
+    },
+    /* -------------------------------------------------------- 本地路径解析
+     * 渲染进程里没有 node 的 path 模块（contextIsolation + 无 nodeIntegration），
+     * 但 Markdown 预览里的相对链接必须先拼成绝对路径才能交给主进程去读。
+     * 这里只实现够用的四件事：判绝对、取目录、归一化、比对同一文件。
+     * Windows / POSIX 都支持，判据是「出现盘符或反斜杠」即按 Windows 处理。
+     * ---------------------------------------------------------------------- */
+    /** 是否绝对路径（`C:\x`、`\\server\share`、`/x`、`\x`） */
+    isAbsolutePath(p) {
+      p = String(p || '');
+      return /^[A-Za-z]:[\\/]/.test(p) || p.charAt(0) === '\\' || p.charAt(0) === '/';
+    },
+    /** 去掉最后一段（`C:\a\b.md` → `C:\a`）；根目录返回自身 */
+    dirOf(p) {
+      const s = String(p || '');
+      const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+      if (i < 0) return '';
+      if (i === 0) return s.charAt(0);
+      if (i === 2 && /^[A-Za-z]:$/.test(s.slice(0, 2))) return s.slice(0, 3);
+      return s.slice(0, i);
+    },
+    /** 归一化：折叠 `.` / `..` / 重复分隔符，并统一该路径自己的分隔符风格 */
+    normalizePath(p) {
+      let s = String(p || '');
+      if (!s) return '';
+      const win = /^[A-Za-z]:/.test(s) || s.indexOf('\\') >= 0;
+      const sep = win ? '\\' : '/';
+      let prefix = '';
+      if (/^[A-Za-z]:/.test(s)) { prefix = s.slice(0, 2); s = s.slice(2); }
+      else if (/^\\\\/.test(s)) { prefix = '\\\\'; s = s.replace(/^\\+/, ''); }
+      const abs = /^[\\/]/.test(s);
+      const out = [];
+      for (const seg of s.split(/[\\/]+/)) {
+        if (!seg || seg === '.') continue;
+        if (seg === '..') {
+          if (out.length && out[out.length - 1] !== '..') out.pop();
+          else if (!abs && !prefix) out.push('..');   // 相对路径开头的 .. 要保留
+          continue;
+        }
+        out.push(seg);
+      }
+      const body = out.join(sep);
+      if (prefix === '\\\\') return '\\\\' + body;
+      if (prefix) return prefix + sep + body;
+      if (abs) return sep + body;
+      return body;
+    },
+    /** 把 rel 直接挂到 dir 下（dir 视为目录，不再向上取一层） */
+    joinPath(dir, rel) {
+      const d = String(dir || '');
+      const r = String(rel || '');
+      if (!d) return NT.util.normalizePath(r);
+      const sep = /^[A-Za-z]:/.test(d) || d.indexOf('\\') >= 0 ? '\\' : '/';
+      return NT.util.normalizePath(d + sep + r);
+    },
+    /** 把相对链接拼成绝对路径；basePath 是当前文档的真实路径 */
+    resolveLinkPath(basePath, rel) {
+      const r = String(rel || '').trim();
+      if (!r) return '';
+      if (NT.util.isAbsolutePath(r)) return NT.util.normalizePath(r);
+      return NT.util.joinPath(NT.util.dirOf(String(basePath || '')), r);
+    },
+    /** 两个路径是否指向同一文件（分隔符归一；Windows 下忽略大小写） */
+    samePath(a, b) {
+      if (!a || !b) return false;
+      const norm = (x) => {
+        const n = NT.util.normalizePath(String(x));
+        return /^[A-Za-z]:/.test(n) || n.indexOf('\\') >= 0
+          ? n.replace(/\//g, '\\').toLowerCase() : n;
+      };
+      return norm(a) === norm(b);
     },
     /** 简易差分：返回新旧文本的公共前缀/后缀，用于把 textarea 的整体输入
      *  还原成一次最小编辑区间，避免每次按键都全量 diff。 */
@@ -3808,6 +3879,9 @@ html[data-theme="dark"] .diff-row-empty { background: var(--bg-alt); }
  * 明确不支持（避免过度承诺）：内联 HTML 透传（一律转义，杜绝 XSS）、
  *   脚注、数学公式、目录自动生成。
  *
+ * 唯一例外是内联 SVG 图形（设计文档里很常见）：它被包成 data URI 放进 <img>，
+ * 由图片上下文隔离，脚本不会执行、外部资源不会加载 —— 见 svgToImg()。
+ *
  * 安全约定：
  *   · 所有文本先 esc() 再拼标签；
  *   · 链接/图片的 URL 经 safeUrl() 过滤，javascript:/vbscript:/data:(非图片) 一律降级为 #；
@@ -3836,7 +3910,87 @@ html[data-theme="dark"] .diff-row-empty { background: var(--bg-alt); }
     return esc(u);
   }
 
+  /**
+   * 标题锚点（与 GitHub / VSCode 的 slug 规则保持一致）：
+   *   `## 1. 背景与设计目标` → `1-背景与设计目标`
+   * 之所以要"跟 GitHub 一致"而不是自己发明一套：中文文档里的目录基本是
+   * 手写的 `[背景与设计目标](#1-背景与设计目标)`，规则一旦不一致，
+   * 用户从 GitHub 上复制过来的文档在应用里就点不动。
+   *
+   * 步骤：先剥掉行内记号（图片/链接/代码/强调/尖括号），再小写化，
+   * 去掉除字母数字汉字下划线连字符以外的所有标点，空格折成连字符。
+   */
+  function slugify(text) {
+    let s = String(text == null ? '' : text);
+    s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+         .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+         .replace(/`+([^`]*)`+/g, '$1')
+         .replace(/[*_~]+/g, '')
+         .replace(/<[^>]*>/g, '');
+    s = s.toLowerCase();
+    s = s.replace(/[^\p{L}\p{N}\s_\-]/gu, '');
+    s = s.trim().replace(/\s+/g, '-');
+    return s || 'section';
+  }
+
+  /** 同名标题会渲染出重复 id，按 GitHub 的规则依次追加 -1 / -2 */
+  function headingId(ctx, rawText) {
+    const base = slugify(rawText);
+    const map = ctx.slugCount || (ctx.slugCount = Object.create(null));
+    if (!(base in map)) { map[base] = 0; return base; }
+    map[base] += 1;
+    return base + '-' + map[base];
+  }
+
   const MD_EXT_RE = /\.(md|markdown|mdx|mkd|mkdn|mdwn)$/i;
+
+  /* ------------------------------------------------------ 内联 SVG 图形 */
+
+  const B64CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+  /** UTF-8 → base64。btoa 只接受 Latin-1，SVG 里只要有中文就会抛异常，不能直接用 */
+  function base64Utf8(str) {
+    const bytes = typeof TextEncoder !== 'undefined'
+      ? new TextEncoder().encode(str)
+      : Uint8Array.from(Buffer.from(str, 'utf8'));
+    let out = '';
+    for (let i = 0; i < bytes.length; i += 3) {
+      const b0 = bytes[i];
+      const has1 = i + 1 < bytes.length;
+      const has2 = i + 2 < bytes.length;
+      const b1 = has1 ? bytes[i + 1] : 0;
+      const b2 = has2 ? bytes[i + 2] : 0;
+      out += B64CHARS[b0 >> 2];
+      out += B64CHARS[((b0 & 3) << 4) | (b1 >> 4)];
+      out += has1 ? B64CHARS[((b1 & 15) << 2) | (b2 >> 6)] : '=';
+      out += has2 ? B64CHARS[b2 & 63] : '=';
+    }
+    return out;
+  }
+
+  /**
+   * 把内联 SVG 变成 `<img src="data:image/svg+xml;base64,…">`。
+   *
+   * 为什么不直接把 <svg> 塞进 innerHTML：
+   *   SVG 里能写 <script>、onload、<foreignObject>，一旦原样透传，就等于
+   *   让任意一个 .md 文件在本应用里执行代码 —— 而本应用暴露了读盘、
+   *   保存、调用系统程序的桥，这个口子不能开。
+   *   放进图片上下文后，浏览器按规范**不执行脚本、不加载外部资源**，
+   *   等于自带一层沙箱，同时导出的 HTML 也仍然能离线显示图（图就是 data URI）。
+   *
+   * 结构不完整（只贴了开头）时不吞内容，退回代码块显示。
+   */
+  const SVG_MAX = 800000;      // 超过这个尺寸多半不是流程图，退回代码块
+
+  function svgToImg(svg, ln, closed) {
+    const src = String(svg == null ? '' : svg).trim();
+    const okShape = /^<svg[\s>]/i.test(src) && /<\/svg\s*>$/i.test(src) && closed !== false;
+    if (!okShape || src.length > SVG_MAX) {
+      return '<pre class="md-code" data-line="' + ln + '"><code>' + esc(src) + '</code></pre>';
+    }
+    return '<img class="md-svg" data-line="' + ln + '" alt="内联 SVG 图形" ' +
+      'src="data:image/svg+xml;base64,' + base64Utf8(src) + '">';
+  }
 
   /** 判断一个文档是不是 Markdown（按语言 id 或文件名后缀） */
   function isMarkdown(doc) {
@@ -4143,9 +4297,24 @@ html[data-theme="dark"] .diff-row-empty { background: var(--bg-alt); }
           buf.push(items[i].t);
           i++;
         }
-        out.push('<pre class="md-code" data-line="' + ln + '"><code' +
-          (lang ? ' class="language-' + esc(lang) + '"' : '') + '>' +
-          esc(buf.join('\n')) + '</code></pre>');
+        out.push(lang.trim().toLowerCase() === 'svg'
+          ? svgToImg(buf.join('\n'), ln, true)          // ```svg → 真图形，不走代码块
+          : '<pre class="md-code" data-line="' + ln + '"><code' +
+            (lang ? ' class="language-' + esc(lang) + '"' : '') + '>' +
+            esc(buf.join('\n')) + '</code></pre>');
+        continue;
+      }
+
+      // 1.5) 裸 <svg> 块：设计类文档常把图形直接内联在 Markdown 里
+      if (/^ {0,3}<svg[\s>]/i.test(raw)) {
+        const buf = [];
+        let closed = false;
+        while (i < n) {
+          buf.push(items[i].t);
+          if (/<\/svg\s*>/i.test(items[i].t)) { closed = true; i++; break; }
+          i++;
+        }
+        out.push(svgToImg(buf.join('\n'), ln, closed));
         continue;
       }
 
@@ -4160,7 +4329,8 @@ html[data-theme="dark"] .diff-row-empty { background: var(--bg-alt); }
       m = ATX_RE.exec(raw) || ATX_TIGHT_RE.exec(raw);
       if (m) {
         const lv = m[1].length;
-        out.push('<h' + lv + ' data-line="' + ln + '">' + inline(m[2], ctx) + '</h' + lv + '>');
+        out.push('<h' + lv + ' id="' + esc(headingId(ctx, m[2])) + '" data-line="' + ln + '">' +
+          inline(m[2], ctx) + '</h' + lv + '>');
         i++;
         continue;
       }
@@ -4222,7 +4392,9 @@ html[data-theme="dark"] .diff-row-empty { background: var(--bg-alt); }
       const body = buf.map((b) => b.t).join('\n');
       if (setext) {
         const lv = setext === 1 ? 1 : 2;
-        out.push('<h' + lv + ' data-line="' + ln + '">' + inline(body.replace(/\n/g, ' '), ctx) + '</h' + lv + '>');
+        const flat = body.replace(/\n/g, ' ');
+        out.push('<h' + lv + ' id="' + esc(headingId(ctx, flat)) + '" data-line="' + ln + '">' +
+          inline(flat, ctx) + '</h' + lv + '>');
       } else {
         out.push('<p data-line="' + ln + '">' + inline(body, ctx) + '</p>');
       }
@@ -4249,6 +4421,7 @@ html[data-theme="dark"] .diff-row-empty { background: var(--bg-alt); }
   NT.markdown = {
     render,
     renderInline: (s) => inline(s, { refs: Object.create(null) }),
+    slugify,
     escapeHtml: esc,
     safeUrl,
     isMarkdown
@@ -7180,6 +7353,53 @@ html[data-theme="dark"] .diff-row-empty { background: var(--bg-alt); }
       document.addEventListener('keydown', (e) => {
         if (e.key === 'F1') { e.preventDefault(); this.exec('help.shortcuts'); }
       }, true);
+      /* 全局快捷键兜底。
+       * 编辑器自己那条 keydown 只在 textarea 有焦点时才会跑，于是"阅读"模式
+       * （焦点在预览区/侧栏）里 Ctrl+O 这类键全哑——用户看到的正是"按了没反应"。
+       * 这里补一层：
+       *   · 编辑器已经处理过的（preventDefault）不再插手，避免重复执行；
+       *   · 焦点在别的输入框里时只认真正全局的命令（否则 Ctrl+C 会抢走
+       *     输入框里的选中内容，去复制编辑器里的东西）；
+       *   · 焦点不在输入控件里时，除纯编辑类命令外全都认。
+       */
+      const ANYWHERE = new Set([
+        'file.new', 'file.open', 'file.save', 'file.saveAs', 'file.close', 'file.closeAll',
+        'ui.palette', 'help.shortcuts', 'help.changelog', 'help.about',
+        'tools.compare', 'search.find', 'search.replace',
+        'md.toggleSplit', 'md.toggleRead', 'md.cycleMode', 'md.exportHtml',
+        'view.toggleSidebar', 'view.toggleTheme', 'view.zoomIn', 'view.zoomOut', 'view.zoomReset',
+        'plugin.manage', 'macro.manage'
+      ]);
+      // 这些命令动的是编辑器里的文本/光标，焦点不在编辑器时交给浏览器原生行为
+      const EDITOR_ONLY = /^edit\.(copy|cut|paste|selectAll|undo|redo|delete|deleteLine|duplicateLine|moveLine|indent|outdent|toggleComment|insertText|gotoLine)$/;
+
+      document.addEventListener('keydown', (e) => {
+        if (e.defaultPrevented || e.isComposing) return;
+        if (this.el.overlay && !this.el.overlay.hidden) return;   // 对话框开着时不抢键
+        const binding = Commands.eventToBinding(e);
+        if (!binding) return;
+        const ids = this.commands.keys.get(binding);
+        if (!ids || !ids.length) return;
+
+        const input = this.view && this.view.input;
+        const t = e.target;
+        if (t === input) return;                                  // 编辑器那条链路负责
+        const tag = t && t.tagName;
+        const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+          (t && t.isContentEditable);
+
+        for (let i = ids.length - 1; i >= 0; i--) {
+          const id = ids[i];
+          if (inField && !ANYWHERE.has(id)) continue;
+          if (!inField && EDITOR_ONLY.test(id)) continue;
+          const cmd = this.commands.get(id);
+          if (!cmd) continue;
+          if (cmd.enabled && !cmd.enabled(this)) continue;
+          e.preventDefault();
+          this.exec(id);
+          return;
+        }
+      });
       NT.bus.on('doc:change', U.debounce(() => {
         this.refreshStatus();
         if (this._sideTab !== 'plugins' && this._sideTab !== 'macros') this.refreshSidebar();
@@ -8219,6 +8439,29 @@ html[data-theme="dark"] .diff-row-empty { background: var(--bg-alt); }
   const MIN_PANE = 260;      // 预览面板最小宽度
   const MIN_EDITOR = 320;    // 分栏时编辑区最小宽度
 
+  /* ----------------------------------------------------------- 链接落点判定
+   * 预览里的 <a> 有两种落点：
+   *   · 带协议头的外部地址（http / https / mailto …）→ 交给系统浏览器
+   *   · 其余一律视为「相对于当前文档」的本地路径（docs/01-设计.md）
+   * 注意 `C:\docs\a.md` 长得也像协议头，必须先按盘符排除掉。
+   * ------------------------------------------------------------------------ */
+  function isExternalHref(href) {
+    if (/^[A-Za-z]:[\\/]/.test(href)) return false;
+    return /^[a-z][a-z0-9+.\-]*:/i.test(href) || href.slice(0, 2) === '//';
+  }
+
+  /** 拆出路径本体与 #锚点，并还原 %E4%B8%AD 这类百分号转义 */
+  function splitLinkTarget(href) {
+    let p = href, hash = '';
+    const cut = p.search(/[?#]/);
+    if (cut >= 0) { hash = p.slice(cut); p = p.slice(0, cut); }
+    try { p = decodeURIComponent(p); } catch (e) { /* 非法转义按原样用 */ }
+    return { path: p, hash: hash };
+  }
+
+  /** 这些后缀当文本打开没有意义，即便按 Ctrl 也交给系统程序 */
+  const BINARY_RE = /\.(png|jpe?g|gif|bmp|webp|ico|pdf|zip|7z|rar|gz|tar|docx?|xlsx?|pptx?|exe|msi|dll|mp[34]|wav|avi|mkv|ttf|otf|woff2?)$/i;
+
   /* ------------------------------------------------------------------ 样式 */
   const CSS = `
 .md-preview {
@@ -8368,7 +8611,29 @@ html[data-theme="dark"] .diff-row-empty { background: var(--bg-alt); }
 .md-preview-body table.md-table th { background: var(--bg-alt); font-weight: 600; }
 .md-preview-body hr { border: none; border-top: 1px solid var(--border); margin: 2.2em 0; }
 .md-preview-body img.md-img { max-width: 100%; border-radius: 4px; }
+/* 内联 SVG 图形：按可用宽度等比缩放，不裁切 */
+.md-preview-body img.md-svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1.1em 0;
+  border-radius: 4px;
+}
 .md-preview-body .md-empty { color: var(--fg-faint); }
+
+/* 锚点跳转的落点提示：滚过去之后闪一下，长文档里不至于看丢 */
+.md-preview-body .md-anchor-hit {
+  animation: mdAnchorHit 1.2s ease-out 1;
+  border-radius: 4px;
+  scroll-margin-top: 12px;
+}
+@keyframes mdAnchorHit {
+  0%   { background: var(--selection); box-shadow: 0 0 0 6px var(--selection); }
+  100% { background: transparent;      box-shadow: 0 0 0 6px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .md-preview-body .md-anchor-hit { animation: none; outline: 2px solid var(--accent); }
+}
 
 /* 导出的独立 HTML 复用同一套规则 */
 body.md-export { margin: 0; background: var(--bg); color: var(--fg); }
@@ -8471,17 +8736,180 @@ body.md-export .md-preview-body {
       }
       this.body.addEventListener('scroll', () => this._onPreviewScroll(), { passive: true });
 
-      // 点击预览里的锚点链接时，交给系统浏览器/外壳打开，不在应用内跳走
+      // 预览里的链接分四类处理：
+      //   外部地址        → 交给系统浏览器（不在应用内跳走）
+      //   页内 #锚点      → 在预览区里滚过去（渲染时标题已带 GitHub 风格 id）
+      //   本地相对路径    → Ctrl/⌘+点击在编辑器内打开；普通点击用系统默认程序
+      //                     （.html 进浏览器、.pdf 进阅读器，符合"打开方式"的直觉）
       this.body.addEventListener('click', (e) => {
         const a = e.target.closest('a.md-link');
         if (!a) return;
         const href = a.getAttribute('href') || '';
-        if (!href || href.charAt(0) === '#') return;
+        if (!href) return;
+        if (href.charAt(0) === '#') {
+          e.preventDefault();
+          this._jumpToAnchor(href.slice(1));
+          return;
+        }
         e.preventDefault();
-        const d = global.notepadDesktop;
-        if (d && d.openExternal) d.openExternal(href);
-        else global.open(href, '_blank', 'noopener');
+        if (isExternalHref(href)) {
+          const d = global.notepadDesktop;
+          if (d && d.openExternal) d.openExternal(href);
+          else global.open(href, '_blank', 'noopener');
+          return;
+        }
+        this._openLocalLink(splitLinkTarget(href), e);
       });
+    }
+
+    /* ------------------------------------------------------ 页内锚点跳转 */
+
+    /**
+     * 预览内 #锚点 跳转。
+     * 不走浏览器原生的两个原因：
+     *   1. 这些链接带 target="_blank"，原生跳转在 Electron 里会先开一个
+     *      空白新窗口，再把那个窗口滚过去——用户看到的是"点了没反应"；
+     *   2. 滚动容器是 .md-preview-body 而不是 window，原生锚点定位会去滚
+     *      整个文档，偏移量也不对（顶部有工具栏）。
+     */
+    _jumpToAnchor(raw) {
+      const app = this.app;
+      let name = String(raw || '');
+      try { name = decodeURIComponent(name); } catch (e) { /* 非法转义按原样用 */ }
+      name = name.replace(/^#/, '').trim();
+
+      if (!name) { this.body.scrollTop = 0; return; }
+
+      const el = this._findAnchorEl(name);
+      if (!el) {
+        app.toast('找不到锚点「#' + name + '」，可能是标题改了名', 'warn');
+        return;
+      }
+
+      const bodyTop = this.body.getBoundingClientRect().top;
+      const target = el.getBoundingClientRect().top - bodyTop + this.body.scrollTop - 12;
+      this.body.scrollTop = Math.max(0, target);
+
+      // 高亮一下目标标题：长文档里滚过去之后没有落点提示很容易迷失
+      el.classList.remove('md-anchor-hit');
+      void el.offsetWidth;                       // 强制回流，让动画能重放
+      el.classList.add('md-anchor-hit');
+      clearTimeout(this._anchorTimer);
+      this._anchorTimer = setTimeout(() => el.classList.remove('md-anchor-hit'), 1200);
+
+      // 分栏时把编辑器也带到同一行，左右不脱节
+      const ln = parseInt(el.getAttribute('data-line'), 10);
+      const view = app.view;
+      if (this.mode === 'split' && !isNaN(ln) && view && view.scrollToLine) {
+        view.scrollToLine(ln, true);
+      }
+    }
+
+    /**
+     * 找锚点目标。先按 id 精确匹配，再退化成"归一化后比较"：
+     * 手写目录里全角括号、多余空格、大小写不一致都很常见，
+     * 而 id 由渲染器生成，两边对不上就会"点了没反应"。
+     */
+    _findAnchorEl(name) {
+      // 用属性遍历而不是 '#id' 选择器：中文 id、带点号的 id 拼选择器要转义，
+      // 漏一个字符就抛异常，白白丢掉整次跳转。
+      const exact = Array.prototype.find.call(
+        this.body.querySelectorAll('[id]'), (n) => n.id === name);
+      if (exact) return exact;
+
+      const norm = (s) => String(s).toLowerCase()
+        .replace(/[\s\u3000]+/g, '-')
+        .replace(/[^\p{L}\p{N}\-_]/gu, '');
+      const want = norm(name);
+      const all = this.body.querySelectorAll('h1,h2,h3,h4,h5,h6,[id]');
+      for (const n of all) {
+        if (norm(n.id || n.textContent || '') === want) return n;
+      }
+      return null;
+    }
+
+    /* ---------------------------------------------------- 本地文件跳转 */
+
+    /**
+     * 打开预览里的本地路径链接。
+     *   Ctrl / ⌘ + 点击 → 在编辑器内打开（该文件已有标签页则直接切过去）
+     *   普通点击        → 交给系统默认程序
+     */
+    async _openLocalLink(target, e) {
+      const app = this.app;
+      const rel = target.path;
+      if (!rel) return;
+
+      const base = app.activeDoc && app.activeDoc.path;
+      if (!base) {
+        app.toast('当前文档还没有保存路径，无法解析相对链接「' + rel + '」', 'warn');
+        return;
+      }
+      // 只有文件名、没有目录：解析相对路径没有参照系，直接说清楚而不是报"文件不存在"
+      if (!U.isAbsolutePath(base)) {
+        app.toast('这个标签页只记录了文件名「' + base + '」，没有真实路径；' +
+          '用 Ctrl+O 重新打开该文件后再点链接', 'warn');
+        return;
+      }
+      const full = U.resolveLinkPath(base, rel);
+
+      const wantEditor = (e.ctrlKey || e.metaKey) && !BINARY_RE.test(rel);
+      if (!wantEditor) { this._openWithSystem(full, rel, base); return; }
+      if (!NT.isDesktop()) {
+        app.toast('浏览器版读不到本地文件，Ctrl+点击请用桌面版', 'warn');
+        return;
+      }
+      await this._openInEditor(full, rel, base);
+    }
+
+    _openWithSystem(full, rel, base) {
+      const app = this.app;
+      const desktop = global.notepadDesktop;
+      if (!desktop || !desktop.openPath) {
+        app.toast('浏览器版无法打开本地文件「' + rel + '」', 'warn');
+        return;
+      }
+      desktop.openPath(this._linkCandidates(base, rel)).then((r) => {
+        if (r && r.ok === false) app.toast('无法打开「' + rel + '」：' + r.error, 'err');
+      }, (err) => app.toast('无法打开「' + rel + '」：' + err.message, 'err'));
+    }
+
+    /**
+     * 候选路径：先按「相对当前文件」解析，再逐级向上按「相对工程根」试。
+     * 因为文档里写 `docs/xx.md` 时，作者往往想的是仓库根，而不是当前文件所在目录；
+     * 当前文件如果本身就在 docs/ 里，只按第一条规则就会拼成 docs/docs/xx.md。
+     */
+    _linkCandidates(base, rel) {
+      const out = [U.resolveLinkPath(base, rel)];
+      let dir = U.dirOf(base);
+      for (let i = 0; i < 4; i++) {
+        const up = U.dirOf(dir);
+        if (!up || up === dir) break;
+        dir = up;
+        const cand = U.joinPath(dir, rel);
+        if (cand && !U.samePath(cand, out[0])) out.push(cand);
+      }
+      return out;
+    }
+
+    async _openInEditor(full, rel, base) {
+      const app = this.app;
+      // 已经打开过就切过去，不制造重复标签页
+      const hit = app.tabs.find((t) => t.doc && t.doc.path && U.samePath(t.doc.path, full));
+      if (hit) { app.activateTab(hit); return; }
+
+      const candidates = this._linkCandidates(base, rel);
+      const f = await global.notepadDesktop.readFileQuiet(candidates);
+      if (!f || !f.data) {
+        const tried = (f && f.tried && f.tried[0]) || full;
+        console.warn('[preview] 链接打不开', { 当前文件: base, 链接: rel, 尝试过: (f && f.tried) || candidates });
+        app.toast('打不开「' + rel + '」：' + ((f && f.error) || '文件不存在') + '｜尝试：' + tried, 'err');
+        return;
+      }
+      const file = new File([f.data], f.name, { type: 'text/plain' });
+      await app.openFile(file, f.path);
+      // 用了兜底候选（大小写/全角/上层目录）时说明一声，避免"我明明写对了"的困惑
+      if (f.matched) app.toast('链接实际指向：' + f.path, 'warn');
     }
 
     /* ------------------------------------------------------------ 模式 */
@@ -8568,6 +8996,7 @@ body.md-export .md-preview-body {
       const text = doc.getText();
       this.body.innerHTML = NT.markdown.render(text);
       this._renderedVersion = doc.version;
+      this._decorateLinks();
       this._rebuildAnchors();
       this._updateStat(text);
       this._syncPreviewToEditor();
@@ -8578,6 +9007,18 @@ body.md-export .md-preview-body {
       const lines = text ? text.split('\n').length : 0;
       const chars = text.replace(/\s/g, '').length;
       this.stat.textContent = '共 ' + lines.toLocaleString() + ' 行 · ' + chars.toLocaleString() + ' 字';
+    }
+
+    /** 给本地路径链接补一句悬停提示，否则没人知道 Ctrl 的用法 */
+    _decorateLinks() {
+      const list = this.body.querySelectorAll('a.md-link');
+      for (const a of list) {
+        const href = a.getAttribute('href') || '';
+        if (!href || href.charAt(0) === '#' || isExternalHref(href)) continue;
+        if (a.getAttribute('title')) continue;          // 尊重 Markdown 里写的 title
+        a.setAttribute('title', (BINARY_RE.test(href) ? '' : 'Ctrl+点击在编辑器中打开 · ') +
+          '点击用系统程序打开');
+      }
     }
 
     _rebuildAnchors() {
@@ -8825,6 +9266,12 @@ body.md-export .md-preview-body {
     // 接管 app.openFile：让拖拽 / 命令行 / 对话框三条入口都带上真实路径
     app.openFile = async function (file, realPath) {
       try {
+        // 拖放进来的 File 不会带 realPath，但 webUtils 能从 File 对象反查真实路径。
+        // 不补这一步，doc.path 会退化成文件名（largefile 用 file.name 兜底），
+        // 后果是 Ctrl+S 变成"另存为"、Markdown 里的相对链接也解析不出来。
+        if (!realPath && typeof desktop.pathForFile === 'function') {
+          try { realPath = desktop.pathForFile(file); } catch (e) { /* 拿不到就退回无路径 */ }
+        }
         const { doc, meta, sizeText } = await NT.largefile.openFile(app, file);
         if (realPath) doc.setPath(realPath);
         app.newTab(doc, { activate: true });

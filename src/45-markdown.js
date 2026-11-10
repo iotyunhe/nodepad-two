@@ -16,6 +16,9 @@
  * 明确不支持（避免过度承诺）：内联 HTML 透传（一律转义，杜绝 XSS）、
  *   脚注、数学公式、目录自动生成。
  *
+ * 唯一例外是内联 SVG 图形（设计文档里很常见）：它被包成 data URI 放进 <img>，
+ * 由图片上下文隔离，脚本不会执行、外部资源不会加载 —— 见 svgToImg()。
+ *
  * 安全约定：
  *   · 所有文本先 esc() 再拼标签；
  *   · 链接/图片的 URL 经 safeUrl() 过滤，javascript:/vbscript:/data:(非图片) 一律降级为 #；
@@ -44,7 +47,87 @@
     return esc(u);
   }
 
+  /**
+   * 标题锚点（与 GitHub / VSCode 的 slug 规则保持一致）：
+   *   `## 1. 背景与设计目标` → `1-背景与设计目标`
+   * 之所以要"跟 GitHub 一致"而不是自己发明一套：中文文档里的目录基本是
+   * 手写的 `[背景与设计目标](#1-背景与设计目标)`，规则一旦不一致，
+   * 用户从 GitHub 上复制过来的文档在应用里就点不动。
+   *
+   * 步骤：先剥掉行内记号（图片/链接/代码/强调/尖括号），再小写化，
+   * 去掉除字母数字汉字下划线连字符以外的所有标点，空格折成连字符。
+   */
+  function slugify(text) {
+    let s = String(text == null ? '' : text);
+    s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+         .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+         .replace(/`+([^`]*)`+/g, '$1')
+         .replace(/[*_~]+/g, '')
+         .replace(/<[^>]*>/g, '');
+    s = s.toLowerCase();
+    s = s.replace(/[^\p{L}\p{N}\s_\-]/gu, '');
+    s = s.trim().replace(/\s+/g, '-');
+    return s || 'section';
+  }
+
+  /** 同名标题会渲染出重复 id，按 GitHub 的规则依次追加 -1 / -2 */
+  function headingId(ctx, rawText) {
+    const base = slugify(rawText);
+    const map = ctx.slugCount || (ctx.slugCount = Object.create(null));
+    if (!(base in map)) { map[base] = 0; return base; }
+    map[base] += 1;
+    return base + '-' + map[base];
+  }
+
   const MD_EXT_RE = /\.(md|markdown|mdx|mkd|mkdn|mdwn)$/i;
+
+  /* ------------------------------------------------------ 内联 SVG 图形 */
+
+  const B64CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+  /** UTF-8 → base64。btoa 只接受 Latin-1，SVG 里只要有中文就会抛异常，不能直接用 */
+  function base64Utf8(str) {
+    const bytes = typeof TextEncoder !== 'undefined'
+      ? new TextEncoder().encode(str)
+      : Uint8Array.from(Buffer.from(str, 'utf8'));
+    let out = '';
+    for (let i = 0; i < bytes.length; i += 3) {
+      const b0 = bytes[i];
+      const has1 = i + 1 < bytes.length;
+      const has2 = i + 2 < bytes.length;
+      const b1 = has1 ? bytes[i + 1] : 0;
+      const b2 = has2 ? bytes[i + 2] : 0;
+      out += B64CHARS[b0 >> 2];
+      out += B64CHARS[((b0 & 3) << 4) | (b1 >> 4)];
+      out += has1 ? B64CHARS[((b1 & 15) << 2) | (b2 >> 6)] : '=';
+      out += has2 ? B64CHARS[b2 & 63] : '=';
+    }
+    return out;
+  }
+
+  /**
+   * 把内联 SVG 变成 `<img src="data:image/svg+xml;base64,…">`。
+   *
+   * 为什么不直接把 <svg> 塞进 innerHTML：
+   *   SVG 里能写 <script>、onload、<foreignObject>，一旦原样透传，就等于
+   *   让任意一个 .md 文件在本应用里执行代码 —— 而本应用暴露了读盘、
+   *   保存、调用系统程序的桥，这个口子不能开。
+   *   放进图片上下文后，浏览器按规范**不执行脚本、不加载外部资源**，
+   *   等于自带一层沙箱，同时导出的 HTML 也仍然能离线显示图（图就是 data URI）。
+   *
+   * 结构不完整（只贴了开头）时不吞内容，退回代码块显示。
+   */
+  const SVG_MAX = 800000;      // 超过这个尺寸多半不是流程图，退回代码块
+
+  function svgToImg(svg, ln, closed) {
+    const src = String(svg == null ? '' : svg).trim();
+    const okShape = /^<svg[\s>]/i.test(src) && /<\/svg\s*>$/i.test(src) && closed !== false;
+    if (!okShape || src.length > SVG_MAX) {
+      return '<pre class="md-code" data-line="' + ln + '"><code>' + esc(src) + '</code></pre>';
+    }
+    return '<img class="md-svg" data-line="' + ln + '" alt="内联 SVG 图形" ' +
+      'src="data:image/svg+xml;base64,' + base64Utf8(src) + '">';
+  }
 
   /** 判断一个文档是不是 Markdown（按语言 id 或文件名后缀） */
   function isMarkdown(doc) {
@@ -351,9 +434,24 @@
           buf.push(items[i].t);
           i++;
         }
-        out.push('<pre class="md-code" data-line="' + ln + '"><code' +
-          (lang ? ' class="language-' + esc(lang) + '"' : '') + '>' +
-          esc(buf.join('\n')) + '</code></pre>');
+        out.push(lang.trim().toLowerCase() === 'svg'
+          ? svgToImg(buf.join('\n'), ln, true)          // ```svg → 真图形，不走代码块
+          : '<pre class="md-code" data-line="' + ln + '"><code' +
+            (lang ? ' class="language-' + esc(lang) + '"' : '') + '>' +
+            esc(buf.join('\n')) + '</code></pre>');
+        continue;
+      }
+
+      // 1.5) 裸 <svg> 块：设计类文档常把图形直接内联在 Markdown 里
+      if (/^ {0,3}<svg[\s>]/i.test(raw)) {
+        const buf = [];
+        let closed = false;
+        while (i < n) {
+          buf.push(items[i].t);
+          if (/<\/svg\s*>/i.test(items[i].t)) { closed = true; i++; break; }
+          i++;
+        }
+        out.push(svgToImg(buf.join('\n'), ln, closed));
         continue;
       }
 
@@ -368,7 +466,8 @@
       m = ATX_RE.exec(raw) || ATX_TIGHT_RE.exec(raw);
       if (m) {
         const lv = m[1].length;
-        out.push('<h' + lv + ' data-line="' + ln + '">' + inline(m[2], ctx) + '</h' + lv + '>');
+        out.push('<h' + lv + ' id="' + esc(headingId(ctx, m[2])) + '" data-line="' + ln + '">' +
+          inline(m[2], ctx) + '</h' + lv + '>');
         i++;
         continue;
       }
@@ -430,7 +529,9 @@
       const body = buf.map((b) => b.t).join('\n');
       if (setext) {
         const lv = setext === 1 ? 1 : 2;
-        out.push('<h' + lv + ' data-line="' + ln + '">' + inline(body.replace(/\n/g, ' '), ctx) + '</h' + lv + '>');
+        const flat = body.replace(/\n/g, ' ');
+        out.push('<h' + lv + ' id="' + esc(headingId(ctx, flat)) + '" data-line="' + ln + '">' +
+          inline(flat, ctx) + '</h' + lv + '>');
       } else {
         out.push('<p data-line="' + ln + '">' + inline(body, ctx) + '</p>');
       }
@@ -457,6 +558,7 @@
   NT.markdown = {
     render,
     renderInline: (s) => inline(s, { refs: Object.create(null) }),
+    slugify,
     escapeHtml: esc,
     safeUrl,
     isMarkdown

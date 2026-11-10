@@ -11,7 +11,7 @@
    *   · 改版本请用 `node bump-version.js patch|minor|major|X.Y.Z`（会同时改这里）；
    *   · build.py 打包时还会用 package.json 覆盖此字面量，确保交付产物一定正确；
    *   · core.test.js 有一条断言校验此处与 package.json 一致，漂移会被测出来。*/
-  NT.version = '1.3.0';
+  NT.version = '1.4.0';
 
   /* ------------------------------------------------------------------ 事件总线
    * 全局单例。约定的事件名（节选）：
@@ -130,6 +130,77 @@
         if (l.ext && l.ext.indexOf(ext) >= 0) return id;
       }
       return 'plaintext';
+    },
+    /* -------------------------------------------------------- 本地路径解析
+     * 渲染进程里没有 node 的 path 模块（contextIsolation + 无 nodeIntegration），
+     * 但 Markdown 预览里的相对链接必须先拼成绝对路径才能交给主进程去读。
+     * 这里只实现够用的四件事：判绝对、取目录、归一化、比对同一文件。
+     * Windows / POSIX 都支持，判据是「出现盘符或反斜杠」即按 Windows 处理。
+     * ---------------------------------------------------------------------- */
+    /** 是否绝对路径（`C:\x`、`\\server\share`、`/x`、`\x`） */
+    isAbsolutePath(p) {
+      p = String(p || '');
+      return /^[A-Za-z]:[\\/]/.test(p) || p.charAt(0) === '\\' || p.charAt(0) === '/';
+    },
+    /** 去掉最后一段（`C:\a\b.md` → `C:\a`）；根目录返回自身 */
+    dirOf(p) {
+      const s = String(p || '');
+      const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+      if (i < 0) return '';
+      if (i === 0) return s.charAt(0);
+      if (i === 2 && /^[A-Za-z]:$/.test(s.slice(0, 2))) return s.slice(0, 3);
+      return s.slice(0, i);
+    },
+    /** 归一化：折叠 `.` / `..` / 重复分隔符，并统一该路径自己的分隔符风格 */
+    normalizePath(p) {
+      let s = String(p || '');
+      if (!s) return '';
+      const win = /^[A-Za-z]:/.test(s) || s.indexOf('\\') >= 0;
+      const sep = win ? '\\' : '/';
+      let prefix = '';
+      if (/^[A-Za-z]:/.test(s)) { prefix = s.slice(0, 2); s = s.slice(2); }
+      else if (/^\\\\/.test(s)) { prefix = '\\\\'; s = s.replace(/^\\+/, ''); }
+      const abs = /^[\\/]/.test(s);
+      const out = [];
+      for (const seg of s.split(/[\\/]+/)) {
+        if (!seg || seg === '.') continue;
+        if (seg === '..') {
+          if (out.length && out[out.length - 1] !== '..') out.pop();
+          else if (!abs && !prefix) out.push('..');   // 相对路径开头的 .. 要保留
+          continue;
+        }
+        out.push(seg);
+      }
+      const body = out.join(sep);
+      if (prefix === '\\\\') return '\\\\' + body;
+      if (prefix) return prefix + sep + body;
+      if (abs) return sep + body;
+      return body;
+    },
+    /** 把 rel 直接挂到 dir 下（dir 视为目录，不再向上取一层） */
+    joinPath(dir, rel) {
+      const d = String(dir || '');
+      const r = String(rel || '');
+      if (!d) return NT.util.normalizePath(r);
+      const sep = /^[A-Za-z]:/.test(d) || d.indexOf('\\') >= 0 ? '\\' : '/';
+      return NT.util.normalizePath(d + sep + r);
+    },
+    /** 把相对链接拼成绝对路径；basePath 是当前文档的真实路径 */
+    resolveLinkPath(basePath, rel) {
+      const r = String(rel || '').trim();
+      if (!r) return '';
+      if (NT.util.isAbsolutePath(r)) return NT.util.normalizePath(r);
+      return NT.util.joinPath(NT.util.dirOf(String(basePath || '')), r);
+    },
+    /** 两个路径是否指向同一文件（分隔符归一；Windows 下忽略大小写） */
+    samePath(a, b) {
+      if (!a || !b) return false;
+      const norm = (x) => {
+        const n = NT.util.normalizePath(String(x));
+        return /^[A-Za-z]:/.test(n) || n.indexOf('\\') >= 0
+          ? n.replace(/\//g, '\\').toLowerCase() : n;
+      };
+      return norm(a) === norm(b);
     },
     /** 简易差分：返回新旧文本的公共前缀/后缀，用于把 textarea 的整体输入
      *  还原成一次最小编辑区间，避免每次按键都全量 diff。 */

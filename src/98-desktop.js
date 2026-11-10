@@ -37,6 +37,12 @@
     // 接管 app.openFile：让拖拽 / 命令行 / 对话框三条入口都带上真实路径
     app.openFile = async function (file, realPath) {
       try {
+        // 拖放进来的 File 不会带 realPath，但 webUtils 能从 File 对象反查真实路径。
+        // 不补这一步，doc.path 会退化成文件名（largefile 用 file.name 兜底），
+        // 后果是 Ctrl+S 变成"另存为"、Markdown 里的相对链接也解析不出来。
+        if (!realPath && typeof desktop.pathForFile === 'function') {
+          try { realPath = desktop.pathForFile(file); } catch (e) { /* 拿不到就退回无路径 */ }
+        }
         const { doc, meta, sizeText } = await NT.largefile.openFile(app, file);
         if (realPath) doc.setPath(realPath);
         app.newTab(doc, { activate: true });

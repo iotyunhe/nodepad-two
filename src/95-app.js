@@ -1348,6 +1348,53 @@
       document.addEventListener('keydown', (e) => {
         if (e.key === 'F1') { e.preventDefault(); this.exec('help.shortcuts'); }
       }, true);
+      /* 全局快捷键兜底。
+       * 编辑器自己那条 keydown 只在 textarea 有焦点时才会跑，于是"阅读"模式
+       * （焦点在预览区/侧栏）里 Ctrl+O 这类键全哑——用户看到的正是"按了没反应"。
+       * 这里补一层：
+       *   · 编辑器已经处理过的（preventDefault）不再插手，避免重复执行；
+       *   · 焦点在别的输入框里时只认真正全局的命令（否则 Ctrl+C 会抢走
+       *     输入框里的选中内容，去复制编辑器里的东西）；
+       *   · 焦点不在输入控件里时，除纯编辑类命令外全都认。
+       */
+      const ANYWHERE = new Set([
+        'file.new', 'file.open', 'file.save', 'file.saveAs', 'file.close', 'file.closeAll',
+        'ui.palette', 'help.shortcuts', 'help.changelog', 'help.about',
+        'tools.compare', 'search.find', 'search.replace',
+        'md.toggleSplit', 'md.toggleRead', 'md.cycleMode', 'md.exportHtml',
+        'view.toggleSidebar', 'view.toggleTheme', 'view.zoomIn', 'view.zoomOut', 'view.zoomReset',
+        'plugin.manage', 'macro.manage'
+      ]);
+      // 这些命令动的是编辑器里的文本/光标，焦点不在编辑器时交给浏览器原生行为
+      const EDITOR_ONLY = /^edit\.(copy|cut|paste|selectAll|undo|redo|delete|deleteLine|duplicateLine|moveLine|indent|outdent|toggleComment|insertText|gotoLine)$/;
+
+      document.addEventListener('keydown', (e) => {
+        if (e.defaultPrevented || e.isComposing) return;
+        if (this.el.overlay && !this.el.overlay.hidden) return;   // 对话框开着时不抢键
+        const binding = Commands.eventToBinding(e);
+        if (!binding) return;
+        const ids = this.commands.keys.get(binding);
+        if (!ids || !ids.length) return;
+
+        const input = this.view && this.view.input;
+        const t = e.target;
+        if (t === input) return;                                  // 编辑器那条链路负责
+        const tag = t && t.tagName;
+        const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+          (t && t.isContentEditable);
+
+        for (let i = ids.length - 1; i >= 0; i--) {
+          const id = ids[i];
+          if (inField && !ANYWHERE.has(id)) continue;
+          if (!inField && EDITOR_ONLY.test(id)) continue;
+          const cmd = this.commands.get(id);
+          if (!cmd) continue;
+          if (cmd.enabled && !cmd.enabled(this)) continue;
+          e.preventDefault();
+          this.exec(id);
+          return;
+        }
+      });
       NT.bus.on('doc:change', U.debounce(() => {
         this.refreshStatus();
         if (this._sideTab !== 'plugins' && this._sideTab !== 'macros') this.refreshSidebar();

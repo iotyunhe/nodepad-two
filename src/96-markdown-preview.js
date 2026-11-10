@@ -26,6 +26,29 @@
   const MIN_PANE = 260;      // 预览面板最小宽度
   const MIN_EDITOR = 320;    // 分栏时编辑区最小宽度
 
+  /* ----------------------------------------------------------- 链接落点判定
+   * 预览里的 <a> 有两种落点：
+   *   · 带协议头的外部地址（http / https / mailto …）→ 交给系统浏览器
+   *   · 其余一律视为「相对于当前文档」的本地路径（docs/01-设计.md）
+   * 注意 `C:\docs\a.md` 长得也像协议头，必须先按盘符排除掉。
+   * ------------------------------------------------------------------------ */
+  function isExternalHref(href) {
+    if (/^[A-Za-z]:[\\/]/.test(href)) return false;
+    return /^[a-z][a-z0-9+.\-]*:/i.test(href) || href.slice(0, 2) === '//';
+  }
+
+  /** 拆出路径本体与 #锚点，并还原 %E4%B8%AD 这类百分号转义 */
+  function splitLinkTarget(href) {
+    let p = href, hash = '';
+    const cut = p.search(/[?#]/);
+    if (cut >= 0) { hash = p.slice(cut); p = p.slice(0, cut); }
+    try { p = decodeURIComponent(p); } catch (e) { /* 非法转义按原样用 */ }
+    return { path: p, hash: hash };
+  }
+
+  /** 这些后缀当文本打开没有意义，即便按 Ctrl 也交给系统程序 */
+  const BINARY_RE = /\.(png|jpe?g|gif|bmp|webp|ico|pdf|zip|7z|rar|gz|tar|docx?|xlsx?|pptx?|exe|msi|dll|mp[34]|wav|avi|mkv|ttf|otf|woff2?)$/i;
+
   /* ------------------------------------------------------------------ 样式 */
   const CSS = `
 .md-preview {
@@ -175,7 +198,29 @@
 .md-preview-body table.md-table th { background: var(--bg-alt); font-weight: 600; }
 .md-preview-body hr { border: none; border-top: 1px solid var(--border); margin: 2.2em 0; }
 .md-preview-body img.md-img { max-width: 100%; border-radius: 4px; }
+/* 内联 SVG 图形：按可用宽度等比缩放，不裁切 */
+.md-preview-body img.md-svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1.1em 0;
+  border-radius: 4px;
+}
 .md-preview-body .md-empty { color: var(--fg-faint); }
+
+/* 锚点跳转的落点提示：滚过去之后闪一下，长文档里不至于看丢 */
+.md-preview-body .md-anchor-hit {
+  animation: mdAnchorHit 1.2s ease-out 1;
+  border-radius: 4px;
+  scroll-margin-top: 12px;
+}
+@keyframes mdAnchorHit {
+  0%   { background: var(--selection); box-shadow: 0 0 0 6px var(--selection); }
+  100% { background: transparent;      box-shadow: 0 0 0 6px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .md-preview-body .md-anchor-hit { animation: none; outline: 2px solid var(--accent); }
+}
 
 /* 导出的独立 HTML 复用同一套规则 */
 body.md-export { margin: 0; background: var(--bg); color: var(--fg); }
@@ -278,17 +323,180 @@ body.md-export .md-preview-body {
       }
       this.body.addEventListener('scroll', () => this._onPreviewScroll(), { passive: true });
 
-      // 点击预览里的锚点链接时，交给系统浏览器/外壳打开，不在应用内跳走
+      // 预览里的链接分四类处理：
+      //   外部地址        → 交给系统浏览器（不在应用内跳走）
+      //   页内 #锚点      → 在预览区里滚过去（渲染时标题已带 GitHub 风格 id）
+      //   本地相对路径    → Ctrl/⌘+点击在编辑器内打开；普通点击用系统默认程序
+      //                     （.html 进浏览器、.pdf 进阅读器，符合"打开方式"的直觉）
       this.body.addEventListener('click', (e) => {
         const a = e.target.closest('a.md-link');
         if (!a) return;
         const href = a.getAttribute('href') || '';
-        if (!href || href.charAt(0) === '#') return;
+        if (!href) return;
+        if (href.charAt(0) === '#') {
+          e.preventDefault();
+          this._jumpToAnchor(href.slice(1));
+          return;
+        }
         e.preventDefault();
-        const d = global.notepadDesktop;
-        if (d && d.openExternal) d.openExternal(href);
-        else global.open(href, '_blank', 'noopener');
+        if (isExternalHref(href)) {
+          const d = global.notepadDesktop;
+          if (d && d.openExternal) d.openExternal(href);
+          else global.open(href, '_blank', 'noopener');
+          return;
+        }
+        this._openLocalLink(splitLinkTarget(href), e);
       });
+    }
+
+    /* ------------------------------------------------------ 页内锚点跳转 */
+
+    /**
+     * 预览内 #锚点 跳转。
+     * 不走浏览器原生的两个原因：
+     *   1. 这些链接带 target="_blank"，原生跳转在 Electron 里会先开一个
+     *      空白新窗口，再把那个窗口滚过去——用户看到的是"点了没反应"；
+     *   2. 滚动容器是 .md-preview-body 而不是 window，原生锚点定位会去滚
+     *      整个文档，偏移量也不对（顶部有工具栏）。
+     */
+    _jumpToAnchor(raw) {
+      const app = this.app;
+      let name = String(raw || '');
+      try { name = decodeURIComponent(name); } catch (e) { /* 非法转义按原样用 */ }
+      name = name.replace(/^#/, '').trim();
+
+      if (!name) { this.body.scrollTop = 0; return; }
+
+      const el = this._findAnchorEl(name);
+      if (!el) {
+        app.toast('找不到锚点「#' + name + '」，可能是标题改了名', 'warn');
+        return;
+      }
+
+      const bodyTop = this.body.getBoundingClientRect().top;
+      const target = el.getBoundingClientRect().top - bodyTop + this.body.scrollTop - 12;
+      this.body.scrollTop = Math.max(0, target);
+
+      // 高亮一下目标标题：长文档里滚过去之后没有落点提示很容易迷失
+      el.classList.remove('md-anchor-hit');
+      void el.offsetWidth;                       // 强制回流，让动画能重放
+      el.classList.add('md-anchor-hit');
+      clearTimeout(this._anchorTimer);
+      this._anchorTimer = setTimeout(() => el.classList.remove('md-anchor-hit'), 1200);
+
+      // 分栏时把编辑器也带到同一行，左右不脱节
+      const ln = parseInt(el.getAttribute('data-line'), 10);
+      const view = app.view;
+      if (this.mode === 'split' && !isNaN(ln) && view && view.scrollToLine) {
+        view.scrollToLine(ln, true);
+      }
+    }
+
+    /**
+     * 找锚点目标。先按 id 精确匹配，再退化成"归一化后比较"：
+     * 手写目录里全角括号、多余空格、大小写不一致都很常见，
+     * 而 id 由渲染器生成，两边对不上就会"点了没反应"。
+     */
+    _findAnchorEl(name) {
+      // 用属性遍历而不是 '#id' 选择器：中文 id、带点号的 id 拼选择器要转义，
+      // 漏一个字符就抛异常，白白丢掉整次跳转。
+      const exact = Array.prototype.find.call(
+        this.body.querySelectorAll('[id]'), (n) => n.id === name);
+      if (exact) return exact;
+
+      const norm = (s) => String(s).toLowerCase()
+        .replace(/[\s\u3000]+/g, '-')
+        .replace(/[^\p{L}\p{N}\-_]/gu, '');
+      const want = norm(name);
+      const all = this.body.querySelectorAll('h1,h2,h3,h4,h5,h6,[id]');
+      for (const n of all) {
+        if (norm(n.id || n.textContent || '') === want) return n;
+      }
+      return null;
+    }
+
+    /* ---------------------------------------------------- 本地文件跳转 */
+
+    /**
+     * 打开预览里的本地路径链接。
+     *   Ctrl / ⌘ + 点击 → 在编辑器内打开（该文件已有标签页则直接切过去）
+     *   普通点击        → 交给系统默认程序
+     */
+    async _openLocalLink(target, e) {
+      const app = this.app;
+      const rel = target.path;
+      if (!rel) return;
+
+      const base = app.activeDoc && app.activeDoc.path;
+      if (!base) {
+        app.toast('当前文档还没有保存路径，无法解析相对链接「' + rel + '」', 'warn');
+        return;
+      }
+      // 只有文件名、没有目录：解析相对路径没有参照系，直接说清楚而不是报"文件不存在"
+      if (!U.isAbsolutePath(base)) {
+        app.toast('这个标签页只记录了文件名「' + base + '」，没有真实路径；' +
+          '用 Ctrl+O 重新打开该文件后再点链接', 'warn');
+        return;
+      }
+      const full = U.resolveLinkPath(base, rel);
+
+      const wantEditor = (e.ctrlKey || e.metaKey) && !BINARY_RE.test(rel);
+      if (!wantEditor) { this._openWithSystem(full, rel, base); return; }
+      if (!NT.isDesktop()) {
+        app.toast('浏览器版读不到本地文件，Ctrl+点击请用桌面版', 'warn');
+        return;
+      }
+      await this._openInEditor(full, rel, base);
+    }
+
+    _openWithSystem(full, rel, base) {
+      const app = this.app;
+      const desktop = global.notepadDesktop;
+      if (!desktop || !desktop.openPath) {
+        app.toast('浏览器版无法打开本地文件「' + rel + '」', 'warn');
+        return;
+      }
+      desktop.openPath(this._linkCandidates(base, rel)).then((r) => {
+        if (r && r.ok === false) app.toast('无法打开「' + rel + '」：' + r.error, 'err');
+      }, (err) => app.toast('无法打开「' + rel + '」：' + err.message, 'err'));
+    }
+
+    /**
+     * 候选路径：先按「相对当前文件」解析，再逐级向上按「相对工程根」试。
+     * 因为文档里写 `docs/xx.md` 时，作者往往想的是仓库根，而不是当前文件所在目录；
+     * 当前文件如果本身就在 docs/ 里，只按第一条规则就会拼成 docs/docs/xx.md。
+     */
+    _linkCandidates(base, rel) {
+      const out = [U.resolveLinkPath(base, rel)];
+      let dir = U.dirOf(base);
+      for (let i = 0; i < 4; i++) {
+        const up = U.dirOf(dir);
+        if (!up || up === dir) break;
+        dir = up;
+        const cand = U.joinPath(dir, rel);
+        if (cand && !U.samePath(cand, out[0])) out.push(cand);
+      }
+      return out;
+    }
+
+    async _openInEditor(full, rel, base) {
+      const app = this.app;
+      // 已经打开过就切过去，不制造重复标签页
+      const hit = app.tabs.find((t) => t.doc && t.doc.path && U.samePath(t.doc.path, full));
+      if (hit) { app.activateTab(hit); return; }
+
+      const candidates = this._linkCandidates(base, rel);
+      const f = await global.notepadDesktop.readFileQuiet(candidates);
+      if (!f || !f.data) {
+        const tried = (f && f.tried && f.tried[0]) || full;
+        console.warn('[preview] 链接打不开', { 当前文件: base, 链接: rel, 尝试过: (f && f.tried) || candidates });
+        app.toast('打不开「' + rel + '」：' + ((f && f.error) || '文件不存在') + '｜尝试：' + tried, 'err');
+        return;
+      }
+      const file = new File([f.data], f.name, { type: 'text/plain' });
+      await app.openFile(file, f.path);
+      // 用了兜底候选（大小写/全角/上层目录）时说明一声，避免"我明明写对了"的困惑
+      if (f.matched) app.toast('链接实际指向：' + f.path, 'warn');
     }
 
     /* ------------------------------------------------------------ 模式 */
@@ -375,6 +583,7 @@ body.md-export .md-preview-body {
       const text = doc.getText();
       this.body.innerHTML = NT.markdown.render(text);
       this._renderedVersion = doc.version;
+      this._decorateLinks();
       this._rebuildAnchors();
       this._updateStat(text);
       this._syncPreviewToEditor();
@@ -385,6 +594,18 @@ body.md-export .md-preview-body {
       const lines = text ? text.split('\n').length : 0;
       const chars = text.replace(/\s/g, '').length;
       this.stat.textContent = '共 ' + lines.toLocaleString() + ' 行 · ' + chars.toLocaleString() + ' 字';
+    }
+
+    /** 给本地路径链接补一句悬停提示，否则没人知道 Ctrl 的用法 */
+    _decorateLinks() {
+      const list = this.body.querySelectorAll('a.md-link');
+      for (const a of list) {
+        const href = a.getAttribute('href') || '';
+        if (!href || href.charAt(0) === '#' || isExternalHref(href)) continue;
+        if (a.getAttribute('title')) continue;          // 尊重 Markdown 里写的 title
+        a.setAttribute('title', (BINARY_RE.test(href) ? '' : 'Ctrl+点击在编辑器中打开 · ') +
+          '点击用系统程序打开');
+      }
     }
 
     _rebuildAnchors() {
