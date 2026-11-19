@@ -601,10 +601,13 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 
 .diff-body {
   flex: 1; overflow-y: auto; overflow-x: hidden;
-  display: flex;
+  display: flex; align-items: flex-start;
 }
 .diff-side {
-  flex: 1; overflow: hidden;
+  /* 不能用 overflow:hidden：会把内容裁在自身高度内，使 #diffBody 的
+   * scrollHeight 恒等于 clientHeight，滚动条与 ↑↓ 跳转同时失效。
+   * 让高度由内容撑开，滚动交给唯一的滚动容器 #diffBody。 */
+  flex: 1; min-width: 0;
   border-right: 1px solid var(--border);
 }
 .diff-side:last-child { border-right: none; }

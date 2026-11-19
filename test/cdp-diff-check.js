@@ -83,6 +83,42 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('  两个标签页 diff: ' + diffResult);
   pass++; // 如果上面没抛异常就算通过
 
+  /* ---------- 对比面板：滚动条 + ↑↓ 跳转 ----------
+   * 回归点：.diff-side 曾用 overflow:hidden 把内容裁在自身高度，
+   * 使 #diffBody 的 scrollHeight === clientHeight —— 滚动条消失，
+   * 且 scrollTop 赋值成为空操作（↑↓ 计数在动、内容却不跳）。
+   */
+  const chk = (label, ok, detail) => {
+    console.log((ok ? '✓' : '✗') + ' ' + label + (detail !== undefined ? ': ' + detail : ''));
+    ok ? pass++ : fail++;
+  };
+  const NL = String.fromCharCode(10); // 避免源码转义歧义，确保是真换行
+  const longA = Array.from({ length: 120 }, (_, i) => 'A 原文第 ' + i + ' 行').join(NL);
+  const longB = Array.from({ length: 120 }, (_, i) => (i % 10 === 0 ? 'B 改文第 ' + i + ' 行' : 'A 原文第 ' + i + ' 行')).join(NL);
+  await ev('(function(){app._showCompare(' + JSON.stringify(longA) + ',' + JSON.stringify(longB) + ",'A.md','B.md');})()");
+  await sleep(300);
+  const total = await ev('app._diffState.diffBlocks.length');
+  const geo = await ev(`(function(){var b=document.getElementById('diffBody'),s=document.getElementById('diffSideA');return {
+    sh:b.scrollHeight, ch:b.clientHeight, so:getComputedStyle(s).overflow,
+    pos:document.getElementById('diffPos').textContent};})()`);
+  chk('内容进入滚动区（出现滚动条）', geo.sh > geo.ch + 100, 'scrollHeight=' + geo.sh + ' clientHeight=' + geo.ch);
+  chk('.diff-side 不再裁剪内容', geo.so === 'visible', 'overflow=' + geo.so);
+  chk('初始定位到第 1 处差异', geo.pos === '1 / ' + total, 'pos=' + geo.pos);
+
+  await ev(`(function(){for(var i=0;i<3;i++)document.getElementById('diffNext').click();})()`);
+  await sleep(150);
+  const nav = await ev(`(function(){var b=document.getElementById('diffBody');return {
+    top:b.scrollTop, pos:document.getElementById('diffPos').textContent,
+    cur:document.querySelectorAll('.diff-row.diff-current').length};})()`);
+  chk('↓ 真实滚动了容器', nav.top > 0, 'scrollTop=' + nav.top);
+  chk('↓ 计数推进到第 4 处', nav.pos === '4 / ' + total, 'pos=' + nav.pos);
+  chk('当前差异两侧高亮', nav.cur === 2, '高亮行数=' + nav.cur);
+
+  await ev(`document.getElementById('diffPrev').click()`);
+  await sleep(150);
+  const prevPos = await ev(`document.getElementById('diffPos').textContent`);
+  chk('↑ 回退到第 3 处', prevPos === '3 / ' + total, 'pos=' + prevPos);
+
   console.log('\n通过 ' + pass + ' 项，失败 ' + fail + ' 项');
   chrome.kill();
   process.exit(fail ? 1 : 0);

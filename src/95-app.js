@@ -1645,11 +1645,14 @@
       // 滚动到对应行
       const row = this._diffView.querySelector('[data-diff="' + idx + '"]');
       if (row) {
-        // 滚动两个面板都到这个位置
+        // 滚动两个面板都到这个位置。#diffBody 是唯一滚动容器，两侧内容等高对齐。
         const body = this._diffView.querySelector('#diffBody');
-        const rowTop = row.offsetTop;
         const bodyH = body.clientHeight;
-        body.scrollTop = Math.max(0, rowTop - bodyH / 3);
+        // 用视口矩形算相对位移，避免 row.offsetTop 受 offsetParent / 工具栏高度影响。
+        const rowRect = row.getBoundingClientRect();
+        const bodyRect = body.getBoundingClientRect();
+        const target = body.scrollTop + (rowRect.top - bodyRect.top) - bodyH / 3;
+        body.scrollTop = Math.max(0, target);
 
         // 高亮当前差异块
         this._diffView.querySelectorAll('.diff-row.diff-current').forEach((r) => r.classList.remove('diff-current'));
