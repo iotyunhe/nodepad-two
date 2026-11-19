@@ -216,7 +216,9 @@
         wordWrap: true, showLineNumbers: true, highlightCurrentLine: true,
         fontSize: 13, theme: 'light', macroDelay: 30, autoComplete: true,
         lightweightLines: 120000, lightweightBytes: 4 * 1024 * 1024,
-        showSidebar: false, mdPreviewWidth: 0, mdAutoPreview: true
+        showSidebar: false, mdPreviewWidth: 0, mdAutoPreview: true,
+        mdOutlineVisible: true, mdOutlineSide: 'right', mdOutlineWidth: 220,
+        mdOutlineCollapsed: false
       };
       let s = def;
       try {
@@ -344,6 +346,9 @@
           }),
           mi('view', 'Markdown 阅读模式', 'md.toggleRead', {
             checked: () => this.preview && this.preview.mode === 'read'
+          }),
+          mi('view', 'Markdown 大纲', 'md.toggleOutline', {
+            checked: () => this.settings.mdOutlineVisible !== false
           }),
           mi('view', '导出为 HTML…', 'md.exportHtml'),
           mi('view', '打开 Markdown 时自动分栏', 'md.toggleAutoPreview', {
@@ -1361,7 +1366,7 @@
         'file.new', 'file.open', 'file.save', 'file.saveAs', 'file.close', 'file.closeAll',
         'ui.palette', 'help.shortcuts', 'help.changelog', 'help.about',
         'tools.compare', 'search.find', 'search.replace',
-        'md.toggleSplit', 'md.toggleRead', 'md.cycleMode', 'md.exportHtml',
+        'md.toggleSplit', 'md.toggleRead', 'md.cycleMode', 'md.exportHtml', 'md.toggleOutline',
         'view.toggleSidebar', 'view.toggleTheme', 'view.zoomIn', 'view.zoomOut', 'view.zoomReset',
         'plugin.manage', 'macro.manage'
       ]);
@@ -2144,6 +2149,10 @@
       C({ id: 'md.exportHtml', title: '导出为 HTML…', category: 'Markdown',
         enabled: mdOn,
         run: () => this.preview.exportHtml() });
+
+      C({ id: 'md.toggleOutline', title: '显示/隐藏 Markdown 大纲', keybinding: 'Ctrl+Shift+O',
+        category: 'Markdown',
+        run: () => this.preview.toggleOutline() });
 
       C({ id: 'md.toggleAutoPreview', title: '打开 Markdown 时自动分栏', category: 'Markdown',
         run: () => {

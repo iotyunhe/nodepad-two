@@ -121,6 +121,100 @@
   cursor: pointer;
 }
 .md-preview-bar .md-export:hover { color: var(--accent); border-color: var(--accent); }
+.md-preview-bar .md-outline-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  padding: 2px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.md-preview-bar .md-outline-btn:hover { background: var(--bg-alt); color: var(--fg); }
+.md-preview-bar .md-outline-btn.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+
+/* ------------------------------------------------------------ 大纲面板
+ * 和预览区平级的 flex 项：所以既能站左边也能站右边，
+ * 折叠时把宽度收到 24px 变成一条竖把手，和内容区分隔条共用一套 pointer 逻辑。 */
+.md-outline {
+  display: none;
+  flex: 0 0 var(--outline-w, 220px);
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+}
+.main[data-outline-side="right"] .md-outline {
+  border-right: none;
+  border-left: 1px solid var(--border);
+}
+.main[data-outline="on"] .md-outline { display: flex; }
+.main[data-outline="on"] .md-outline.collapsed { flex-basis: 24px; }
+
+.md-outline-splitter {
+  display: none;
+  flex: 0 0 4px;
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+}
+.main[data-outline="on"] .md-outline-splitter { display: block; }
+.main[data-outline="on"] .md-outline.collapsed + .md-outline-splitter,
+.main[data-outline="on"] .md-outline-splitter.collapsed { display: none; }
+.md-outline-splitter:hover::after,
+.md-outline-splitter.dragging::after {
+  content: '';
+  position: absolute;
+  inset: 0 1px;
+  background: var(--accent);
+  opacity: .35;
+}
+
+.md-outline-head {
+  display: flex; align-items: center; gap: 4px;
+  flex: none; height: 30px; padding: 0 5px 0 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px; user-select: none;
+}
+.md-outline-title { flex: 1; font-weight: 600; color: var(--fg); }
+.md-outline-grip {
+  color: var(--fg-faint); cursor: grab; padding: 0 5px;
+  font-size: 14px; letter-spacing: -3px; line-height: 1;
+}
+.md-outline-grip:active { cursor: grabbing; }
+.md-outline-grip:hover { color: var(--accent); }
+.md-outline-toggle,
+.md-outline-rail {
+  border: 0; background: transparent; color: var(--fg-faint);
+  cursor: pointer; font: inherit; padding: 2px 5px; border-radius: 4px;
+}
+.md-outline-toggle:hover,
+.md-outline-rail:hover { background: var(--bg-alt); color: var(--accent); }
+
+.md-outline-tree { flex: 1; overflow: auto; padding: 6px 4px 24px; }
+.md-outline-item {
+  display: block; width: 100%; border: 0; background: transparent;
+  text-align: left; color: var(--fg-dim); font: inherit; font-size: 12.5px;
+  line-height: 1.5; padding: 4px 8px; border-radius: 4px; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.md-outline-item:hover { background: var(--bg-alt); color: var(--fg); }
+.md-outline-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.md-outline-empty { color: var(--fg-faint); font-size: 12px; padding: 8px 10px; }
+
+.md-outline-rail {
+  display: none; flex: 1; align-items: center; justify-content: center;
+  padding: 10px 0; border-radius: 0;
+}
+.md-outline-rail span { writing-mode: vertical-rl; letter-spacing: 3px; font-size: 11.5px; }
+.md-outline.collapsed .md-outline-head,
+.md-outline.collapsed .md-outline-tree { display: none; }
+.md-outline.collapsed .md-outline-rail { display: flex; }
+
+/* 拖着标题栏换边时的落点提示 */
+.main[data-outline-drag="left"] .md-outline { border-right: 2px solid var(--accent); }
+.main[data-outline-drag="right"] .md-outline { border-left: 2px solid var(--accent); }
 
 .md-preview-body {
   flex: 1;
@@ -289,6 +383,7 @@ body.md-export .md-preview-body {
           '</div>' +
           '<span class="md-preview-stat"></span>' +
           '<span class="spacer"></span>' +
+          '<button type="button" class="md-outline-btn" title="显示/隐藏大纲 (Ctrl+Shift+O)">大纲</button>' +
           '<button type="button" class="md-export" title="导出为可独立打开的 HTML 文件">导出 HTML</button>' +
         '</div>' +
         '<div class="md-preview-body"></div>';
@@ -308,6 +403,50 @@ body.md-export .md-preview-body {
       this.body = pane.querySelector('.md-preview-body');
       this.stat = pane.querySelector('.md-preview-stat');
       this.segButtons = Array.prototype.slice.call(pane.querySelectorAll('.md-seg button'));
+      this.outlineBtn = pane.querySelector('.md-outline-btn');
+
+      /* 大纲面板。它是 .main 的直接子元素（不是预览面板的子元素），
+       * 这样才能摆到编辑器左边去；右侧还有侧边栏时要插在它前面。 */
+      const outline = document.createElement('aside');
+      outline.className = 'md-outline';
+      outline.innerHTML =
+        '<div class="md-outline-head">' +
+          '<span class="md-outline-title">大纲</span>' +
+          '<span class="md-outline-grip" title="拖动到另一侧">⠿</span>' +
+          '<button type="button" class="md-outline-toggle" title="收起大纲">›</button>' +
+        '</div>' +
+        '<div class="md-outline-tree"></div>' +
+        '<button type="button" class="md-outline-rail" title="展开大纲"><span>大纲</span></button>';
+      const outlineSplitter = document.createElement('div');
+      outlineSplitter.className = 'md-outline-splitter';
+      this.outline = outline;
+      this.outlineSplitter = outlineSplitter;
+      this.outlineTree = outline.querySelector('.md-outline-tree');
+      this.outlineItems = [];
+      this._placeOutline();
+    }
+
+    /** 按设置把大纲放到左边或右边；侧边栏永远保持在最右 */
+    _placeOutline() {
+      if (!this.main || !this.outline) return;
+      const side = this.app.settings.mdOutlineSide === 'left' ? 'left' : 'right';
+      if (side === 'left') {
+        this.main.insertBefore(this.outline, this.main.firstChild);
+        this.main.insertBefore(this.outlineSplitter, this.outline.nextSibling);
+      } else {
+        const anchor = this.main.querySelector('.sidebar') ||
+          this.main.querySelector('.sidebar-rail');
+        if (anchor) {
+          this.main.insertBefore(this.outlineSplitter, anchor);
+          this.main.insertBefore(this.outline, anchor);
+        } else {
+          this.main.appendChild(this.outlineSplitter);
+          this.main.appendChild(this.outline);
+        }
+      }
+      this.main.dataset.outlineSide = side;
+      const btn = this.outline.querySelector('.md-outline-toggle');
+      if (btn) btn.textContent = side === 'left' ? '‹' : '›';
     }
 
     _bind() {
@@ -315,6 +454,25 @@ body.md-export .md-preview-body {
         b.addEventListener('click', () => this.setMode(b.dataset.mode));
       }
       this.pane.querySelector('.md-export').addEventListener('click', () => this.exportHtml());
+      if (this.outlineBtn) {
+        this.outlineBtn.addEventListener('click', () => this.toggleOutline());
+      }
+      this.outline.querySelector('.md-outline-toggle').addEventListener('click', () => {
+        this.app.settings.mdOutlineCollapsed = true;
+        this.app.saveSettings();
+        this._applyOutlineState();
+      });
+      this.outline.querySelector('.md-outline-rail').addEventListener('click', () => {
+        this.app.settings.mdOutlineCollapsed = false;
+        this.app.saveSettings();
+        this._applyOutlineState();
+      });
+      this.outline.querySelector('.md-outline-grip').addEventListener('pointerdown', (e) => {
+        this._startOutlineSideDrag(e);
+      });
+      this.outlineSplitter.addEventListener('pointerdown', (e) => {
+        this._startOutlineResize(e);
+      });
       this.splitter.addEventListener('pointerdown', (e) => this._onSplitterDown(e));
 
       const view = this.app.view;
@@ -529,6 +687,7 @@ body.md-export .md-preview-body {
       for (const b of this.segButtons) {
         b.classList.toggle('active', b.dataset.mode === this.mode);
       }
+      this._applyOutlineState();
       const w = this.app.settings && this.app.settings.mdPreviewWidth;
       if (w) this.pane.style.flexBasis = w + 'px';
       // 阅读模式下编辑器不可见，重新渲染一次拿到正确的尺寸
@@ -574,8 +733,11 @@ body.md-export .md-preview-body {
       if (this.mode === 'edit' || !md || !doc) {
         if (this.body.firstChild) this.body.innerHTML = '';
         this._anchors = [];
+        this.outlineItems = [];
+        if (this.outlineTree) this.outlineTree.innerHTML = '';
         this._renderedVersion = -1;
         if (this.stat) this.stat.textContent = '';
+        this._applyOutlineState();
         return;
       }
       if (!force && this._renderedVersion === doc.version) return;
@@ -585,6 +747,7 @@ body.md-export .md-preview-body {
       this._renderedVersion = doc.version;
       this._decorateLinks();
       this._rebuildAnchors();
+      this._buildOutline();
       this._updateStat(text);
       this._syncPreviewToEditor();
     }
@@ -631,6 +794,153 @@ body.md-export .md-preview-body {
       return best;
     }
 
+    /* ------------------------------------------------------------ 大纲 */
+
+    /** 显示/隐藏大纲。force 省略时按当前状态取反 */
+    toggleOutline(force) {
+      const on = typeof force === 'boolean' ? force : !this.app.settings.mdOutlineVisible;
+      this.app.settings.mdOutlineVisible = on;
+      this.app.saveSettings();
+      this._applyOutlineState();
+      this.app.toast(on ? '已显示大纲' : '已隐藏大纲', 'ok');
+      return on;
+    }
+
+    /** 把设置里的可见性/折叠/宽度/方向落到 DOM */
+    _applyOutlineState() {
+      const s = this.app.settings;
+      const on = !!s.mdOutlineVisible && this.mode !== 'edit' && this.isMarkdown();
+      if (this.main) this.main.dataset.outline = on ? 'on' : 'off';
+      if (this.outline) {
+        this.outline.classList.toggle('collapsed', !!s.mdOutlineCollapsed);
+        this.outlineSplitter.classList.toggle('collapsed', !!s.mdOutlineCollapsed);
+        const w = U.clamp(Number(s.mdOutlineWidth) || 220, 150, 420);
+        this.outline.style.setProperty('--outline-w', w + 'px');
+      }
+      if (this.outlineBtn) this.outlineBtn.classList.toggle('active', !!s.mdOutlineVisible);
+    }
+
+    /** 拖标题栏的把手：在窗口左半边松手就靠左，右半边就靠右 */
+    _startOutlineSideDrag(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const grip = e.currentTarget;
+      try { grip.setPointerCapture(e.pointerId); } catch (err) { /* 老浏览器忽略 */ }
+      const rect = this.main.getBoundingClientRect();
+      const startX = e.clientX;
+      const mid = rect.left + rect.width / 2;
+      const sideOf = (x) => x < mid ? 'left' : 'right';
+
+      const move = (ev) => {
+        if (Math.abs(ev.clientX - startX) < 20) return;
+        this.main.dataset.outlineDrag = sideOf(ev.clientX);
+      };
+      const up = (ev) => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        delete this.main.dataset.outlineDrag;
+        if (Math.abs(ev.clientX - startX) < 20) return;
+        const side = sideOf(ev.clientX);
+        if (side === this.app.settings.mdOutlineSide) return;
+        this.app.settings.mdOutlineSide = side;
+        this.app.saveSettings();
+        this._placeOutline();
+        this.app.toast('大纲已移到' + (side === 'left' ? '左' : '右') + '侧', 'ok');
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+    }
+
+    /** 拖大纲和内容之间的分隔条改宽度 */
+    _startOutlineResize(e) {
+      e.preventDefault();
+      const rect = this.main.getBoundingClientRect();
+      const startX = e.clientX;
+      const startW = this.outline.getBoundingClientRect().width;
+      const isLeft = this.app.settings.mdOutlineSide === 'left';
+      const maxW = Math.max(150, Math.min(420, rect.width - 360));
+      this.outlineSplitter.classList.add('dragging');
+
+      const move = (ev) => {
+        const delta = isLeft ? (ev.clientX - startX) : (startX - ev.clientX);
+        const w = U.clamp(startW + delta, 150, maxW);
+        this.outline.style.setProperty('--outline-w', w + 'px');
+        this._dragOutlineWidth = w;
+      };
+      const up = () => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        this.outlineSplitter.classList.remove('dragging');
+        if (this._dragOutlineWidth) {
+          this.app.settings.mdOutlineWidth = Math.round(this._dragOutlineWidth);
+          this.app.saveSettings();
+        }
+        if (this.app.view) this.app.view.render(true);
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+    }
+
+    /** 渲染后重建目录树；标题在 45-markdown.js 里已经带好 id 与 data-line */
+    _buildOutline() {
+      if (!this.outlineTree) return;
+      this.outlineItems = [];
+      const heads = this.body.querySelectorAll('h1,h2,h3,h4,h5,h6');
+      if (!heads.length) {
+        this.outlineTree.innerHTML = '<div class="md-outline-empty">（文档没有标题）</div>';
+        return;
+      }
+      const frag = document.createDocumentFragment();
+      for (const h of heads) {
+        const lv = parseInt(h.tagName.charAt(1), 10) || 1;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'md-outline-item';
+        btn.style.paddingLeft = (6 + (lv - 1) * 11) + 'px';
+        btn.textContent = (h.textContent || '').trim() || '（无标题）';
+        btn.title = btn.textContent;
+        if (h.id) btn.dataset.id = h.id;
+        if (h.getAttribute('data-line') !== null) btn.dataset.line = h.getAttribute('data-line');
+        btn.addEventListener('click', () => {
+          if (btn.dataset.id) this._jumpToAnchor(btn.dataset.id);
+          else this._goToLine(parseInt(btn.dataset.line, 10));
+        });
+        frag.appendChild(btn);
+        this.outlineItems.push({ btn: btn, el: h });
+      }
+      this.outlineTree.innerHTML = '';
+      this.outlineTree.appendChild(frag);
+      this._syncOutlineActive();
+    }
+
+    _goToLine(line) {
+      const view = this.app.view;
+      if (isNaN(line) || !view || !view.scrollToLine) return;
+      view.scrollToLine(line, true);
+      if (this.mode === 'read') this.app.preview.setMode('split', { silent: true });
+    }
+
+    /** 滚动时高亮当前所在章节，并把条目滚进可视区 */
+    _syncOutlineActive() {
+      const items = this.outlineItems || [];
+      if (!items.length) return;
+      const top = this.body.getBoundingClientRect().top + 28;
+      let active = 0;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].el.getBoundingClientRect().top <= top) active = i;
+        else break;
+      }
+      for (let i = 0; i < items.length; i++) {
+        items[i].btn.classList.toggle('active', i === active);
+      }
+      const cur = items[active].btn;
+      const tree = this.outlineTree;
+      if (cur.offsetTop < tree.scrollTop ||
+          cur.offsetTop + cur.offsetHeight > tree.scrollTop + tree.clientHeight) {
+        tree.scrollTop = Math.max(0, cur.offsetTop - tree.clientHeight / 2);
+      }
+    }
+
     /* -------------------------------------------------------- 滚动同步 */
 
     _onEditorScroll() {
@@ -659,6 +969,7 @@ body.md-export .md-preview-body {
     }
 
     _onPreviewScroll() {
+      this._syncOutlineActive();
       if (this.mode !== 'split' || this._syncing) return;
       const arr = this._anchors;
       if (!arr.length) return;
@@ -805,6 +1116,8 @@ body.md-export .md-preview-body {
       clearTimeout(this._timer);
       if (this.pane) this.pane.remove();
       if (this.splitter) this.splitter.remove();
+      if (this.outline) this.outline.remove();
+      if (this.outlineSplitter) this.outlineSplitter.remove();
     }
   }
 
